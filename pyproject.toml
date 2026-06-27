@@ -1,0 +1,22 @@
+[project]
+name = "reels-trends"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "apscheduler>=3.11.2",
+  "httpx2>=2.4.0",
+  "pandas>=3.0.3",
+  "pydantic>=2.13.4",
+  "pydantic-settings>=2.9.1",
+  "aiosqlite>=0.21.0",
+  "sqlalchemy[asyncio]>=2.0.51",
+]
+
+[project.scripts]
+reels-trends = "reels_trends:run"
+
+[build-system]
+requires = ["uv_build>=0.11.23,<0.12.0"]
+build-backend = "uv_build"
