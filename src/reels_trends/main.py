@@ -106,7 +106,9 @@ async def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(module)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S",
+        force=True,
     )
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -129,11 +131,19 @@ async def main() -> None:
     scheduler.start()
     logger.info("Scheduler started with 4 global jobs")
 
-    workers = [asyncio.create_task(worker()) for _ in range(3)]
-
     bot, dp = create_bot(settings.TELEGRAM_BOT_TOKEN)
     global _bot
     _bot = bot
+
+    def _on_worker_done(task: asyncio.Task) -> None:
+        if not task.cancelled() and task.exception():
+            logger.error("worker crashed: %s", task.exception())
+
+    workers = [asyncio.create_task(worker()) for _ in range(3)]
+    for w in workers:
+        w.add_done_callback(_on_worker_done)
+    await enqueue("posts")
+
     logger.info("Starting bot polling")
     try:
         await dp.start_polling(bot)
