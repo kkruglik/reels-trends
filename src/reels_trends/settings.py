@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     APIFY_TOKEN: str
     DATABASE_URL: str
+    TELEGRAM_BOT_TOKEN: str
 
 
 settings = Settings()

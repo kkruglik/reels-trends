@@ -12,6 +12,7 @@ dependencies = [
   "pydantic-settings>=2.9.1",
   "aiosqlite>=0.21.0",
   "sqlalchemy[asyncio]>=2.0.51",
+  "aiogram>=3.20.0",
 ]
 
 [project.scripts]
