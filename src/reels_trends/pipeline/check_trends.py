@@ -2,6 +2,7 @@ from asyncio import sleep
 from html import escape
 from reels_trends.pipeline.base import TaskContext, START
 from reels_trends.db.models import ReelsModel, TaskModel
+from reels_trends.settings import settings
 from sqlalchemy import select, update
 from datetime import datetime, timedelta, UTC
 from typing import TypedDict
@@ -9,10 +10,6 @@ import logging
 import pandas as pd
 
 logger = logging.getLogger(__name__)
-
-FRESHNESS_WINDOW = timedelta(hours=6)
-TRENDING_MULTIPLIER = 1.5
-BASELINE_QUANTILE = 0.75
 
 
 def _to_df(posts: list[ReelsModel]) -> pd.DataFrame:
@@ -49,7 +46,7 @@ class FetchTrendingData:
         self, state: CheckTrendingState, ctx: TaskContext
     ) -> CheckTrendingState:
         account = state["account_name"]
-        cutoff = datetime.now(UTC) - FRESHNESS_WINDOW
+        cutoff = datetime.now(UTC) - timedelta(hours=settings.TRENDING_FRESHNESS_HOURS)
 
         candidates_result = await ctx["db_session"].execute(
             select(ReelsModel).where(
@@ -69,7 +66,7 @@ class FetchTrendingData:
             select(ReelsModel)
             .where(ReelsModel.username == account)
             .order_by(ReelsModel.posted_at.desc())
-            .limit(500)
+            .limit(settings.TRENDING_HISTORY_LIMIT)
         )
         history = history_result.scalars().all()
 
@@ -112,9 +109,15 @@ class PredictTrending:
                 "video_view_count"
             ].clip(lower=1)
 
-        baseline_lph = history["likes_per_hour"].quantile(BASELINE_QUANTILE)
-        baseline_vph = history["views_per_hour"].quantile(BASELINE_QUANTILE)
-        baseline_er = history["engagement_rate"].quantile(BASELINE_QUANTILE)
+        baseline_lph = history["likes_per_hour"].quantile(
+            settings.TRENDING_BASELINE_QUANTILE
+        )
+        baseline_vph = history["views_per_hour"].quantile(
+            settings.TRENDING_BASELINE_QUANTILE
+        )
+        baseline_er = history["engagement_rate"].quantile(
+            settings.TRENDING_BASELINE_QUANTILE
+        )
 
         logger.info(
             "baseline account=%s lph=%.2f vph=%.2f er=%.4f",
@@ -125,11 +128,20 @@ class PredictTrending:
         )
 
         is_trending = (
-            (candidates["likes_per_hour"] >= baseline_lph * TRENDING_MULTIPLIER)
-            | (candidates["views_per_hour"] >= baseline_vph * TRENDING_MULTIPLIER)
+            (
+                candidates["likes_per_hour"]
+                >= baseline_lph * settings.TRENDING_MULTIPLIER
+            )
+            | (
+                candidates["views_per_hour"]
+                >= baseline_vph * settings.TRENDING_MULTIPLIER
+            )
             | (
                 (candidates["video_view_count"] >= 1000)
-                & (candidates["engagement_rate"] >= baseline_er * TRENDING_MULTIPLIER)
+                & (
+                    candidates["engagement_rate"]
+                    >= baseline_er * settings.TRENDING_MULTIPLIER
+                )
             )
         )
 

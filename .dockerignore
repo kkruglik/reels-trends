@@ -1,0 +1,7 @@
+.env
+*.db
+data/
+.venv/
+.git/
+.ruff_cache/
+__pycache__/

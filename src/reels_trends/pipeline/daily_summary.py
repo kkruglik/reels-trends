@@ -2,6 +2,7 @@ from asyncio import sleep
 from html import escape
 from reels_trends.pipeline.base import TaskContext, START
 from reels_trends.db.models import ReelsModel, TaskModel
+from reels_trends.settings import settings
 from sqlalchemy import select
 from datetime import datetime, timedelta, UTC
 from typing import TypedDict
@@ -27,7 +28,7 @@ class NotifySummary:
     ) -> DailySummaryState:
         account = state["account_name"]
         session = ctx["db_session"]
-        cutoff = datetime.now(UTC) - timedelta(days=1)
+        cutoff = datetime.now(UTC) - timedelta(days=settings.SUMMARY_LOOKBACK_DAYS)
 
         reels_result = await session.execute(
             select(ReelsModel)
@@ -36,7 +37,7 @@ class NotifySummary:
                 ReelsModel.posted_at > cutoff,
             )
             .order_by(ReelsModel.video_view_count.desc())
-            .limit(5)
+            .limit(settings.SUMMARY_TOP_COUNT)
         )
         reels = reels_result.scalars().all()
 

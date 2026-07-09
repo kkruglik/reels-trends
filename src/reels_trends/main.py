@@ -67,7 +67,7 @@ async def worker() -> None:
                 get_session() as db_session,
                 httpx.AsyncClient(
                     headers={"Authorization": f"Bearer {settings.APIFY_TOKEN}"},
-                    timeout=httpx.Timeout(200.0),
+                    timeout=httpx.Timeout(settings.HTTPX_TIMEOUT),
                 ) as http_client,
             ):
                 ctx: TaskContext = {
@@ -114,19 +114,36 @@ async def main() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(enqueue, "interval", hours=2, args=["posts"], id="global_posts")
-    scheduler.add_job(enqueue, "cron", minute=15, args=["trends"], id="global_trends")
     scheduler.add_job(
-        enqueue, "cron", hour=3, minute=0, args=["profile"], id="global_profile"
+        enqueue,
+        "interval",
+        hours=settings.SCRAPE_POSTS_INTERVAL_HOURS,
+        args=["posts"],
+        id="global_posts",
     )
     scheduler.add_job(
         enqueue,
         "cron",
-        hour=20,
+        minute=settings.CHECK_TRENDS_CRON_MINUTE,
+        args=["trends"],
+        id="global_trends",
+    )
+    scheduler.add_job(
+        enqueue,
+        "cron",
+        hour=settings.SCRAPE_PROFILE_CRON_HOUR,
+        minute=0,
+        args=["profile"],
+        id="global_profile",
+    )
+    scheduler.add_job(
+        enqueue,
+        "cron",
+        hour=settings.DAILY_SUMMARY_CRON_HOUR,
         minute=0,
         args=["summary"],
         id="global_summary",
-        timezone="Europe/Tallinn",
+        timezone=settings.DAILY_SUMMARY_TIMEZONE,
     )
     scheduler.start()
     logger.info("Scheduler started with 4 global jobs")
@@ -139,7 +156,7 @@ async def main() -> None:
         if not task.cancelled() and task.exception():
             logger.error("worker crashed: %s", task.exception())
 
-    workers = [asyncio.create_task(worker()) for _ in range(3)]
+    workers = [asyncio.create_task(worker()) for _ in range(settings.NUM_WORKERS)]
     for w in workers:
         w.add_done_callback(_on_worker_done)
     await enqueue("posts")

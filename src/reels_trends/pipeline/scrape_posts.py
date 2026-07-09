@@ -1,6 +1,7 @@
 from reels_trends.pipeline.base import TaskContext, START
 from reels_trends.db.utils import upsert_to_db
 from reels_trends.db.models import ReelsModel
+from reels_trends.settings import settings
 from datetime import datetime, timedelta, UTC
 from typing import TypedDict, Any, cast
 import asyncio
@@ -38,12 +39,12 @@ class ScrapeInstagramPostsStep:
         self, state: ScrapePostsState, ctx: TaskContext
     ) -> ScrapePostsState:
         account = state["account_name"]
-        cutoff = (datetime.now(UTC) - timedelta(days=2)).strftime(
-            "%Y-%m-%dT%H:%M:%S.000Z"
-        )
+        cutoff = (
+            datetime.now(UTC) - timedelta(days=settings.SCRAPE_LOOKBACK_DAYS)
+        ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         payload: ReelScraperInput = {
             "username": [account],
-            "resultsLimit": 30,
+            "resultsLimit": settings.SCRAPE_RESULTS_LIMIT,
             "onlyPostsNewerThan": cutoff,
         }
         response = await ctx["http_client"].post(
