@@ -45,12 +45,12 @@ class NotifySummary:
             logger.info("no reels account=%s", account)
             return {}
 
-        users_result = await session.execute(
-            select(TaskModel.user_id).where(TaskModel.username == account)
+        chat_ids_result = await session.execute(
+            select(TaskModel.chat_id).where(TaskModel.username == account)
         )
-        user_ids = users_result.scalars().all()
+        chat_ids = chat_ids_result.scalars().all()
 
-        for user_id in user_ids:
+        for chat_id in chat_ids:
             message = f"📊 <b>Daily Top 5 from @{account}</b>\n\n"
             for i, reel in enumerate(reels, 1):
                 caption = escape((reel.caption or "")[:100])
@@ -60,13 +60,13 @@ class NotifySummary:
                     f"👍 {reel.likes_count:,} · 💬 {reel.comments_count:,} · 👁 {views}\n"
                     f'<a href="{reel.url}">Watch</a>\n\n'
                 )
-            await ctx["bot"].send_message(user_id, message, parse_mode="HTML")
+            await ctx["bot"].send_message(chat_id, message, parse_mode="HTML")
             await sleep(0.5)
 
         logger.info(
-            "sent account=%s users=%d posts=%d",
+            "sent account=%s chats=%d posts=%d",
             account,
-            len(user_ids),
+            len(chat_ids),
             len(reels),
         )
         return {}

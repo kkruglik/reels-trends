@@ -1,8 +1,9 @@
+from zoneinfo import ZoneInfo
 from reels_trends.pipeline.base import TaskContext, START
 from reels_trends.db.utils import upsert_to_db
 from reels_trends.db.models import ReelsModel
 from reels_trends.settings import settings
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, UTC, time
 from typing import TypedDict, Any, cast
 import asyncio
 import logging
@@ -33,6 +34,9 @@ class ScrapeInstagramPostsStep:
     depends = [START]
 
     def should_apply(self, state: ScrapePostsState) -> bool:
+        now = datetime.now(ZoneInfo(settings.DAILY_SUMMARY_TIMEZONE)).time()
+        if now >= time(22, 0) or now < time(7, 0):
+            return False
         return True
 
     async def apply(

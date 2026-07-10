@@ -54,6 +54,7 @@ class FetchTrendingData:
                 ReelsModel.posted_at >= cutoff,
                 ReelsModel.is_notified.is_(False),
                 ReelsModel.is_trending.is_(False),
+                # ReelsModel.video_view_count > 0,
             )
         )
         candidates = candidates_result.scalars().all()
@@ -194,12 +195,12 @@ class NotifyTrending:
         )
         await session.commit()
 
-        users_result = await session.execute(
-            select(TaskModel.user_id).where(TaskModel.username == account)
+        chat_ids_result = await session.execute(
+            select(TaskModel.chat_id).where(TaskModel.username == account)
         )
-        user_ids = users_result.scalars().all()
+        chat_ids = chat_ids_result.scalars().all()
 
-        for user_id in user_ids:
+        for chat_id in chat_ids:
             for reel in reels:
                 caption = escape((reel.caption or "")[:120])
                 views = f"{reel.video_view_count:,}" if reel.video_view_count else "—"
@@ -209,10 +210,10 @@ class NotifyTrending:
                     f"👍 {reel.likes_count:,} · 💬 {reel.comments_count:,} · 👁 {views}\n\n"
                     f'<a href="{reel.url}">Watch reel</a>'
                 )
-                await ctx["bot"].send_message(user_id, text, parse_mode="HTML")
+                await ctx["bot"].send_message(chat_id, text, parse_mode="HTML")
                 await sleep(0.5)
 
         logger.info(
-            "notified account=%s users=%d posts=%d", account, len(user_ids), len(reels)
+            "notified account=%s chats=%d posts=%d", account, len(chat_ids), len(reels)
         )
         return {}

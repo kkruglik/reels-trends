@@ -17,6 +17,7 @@ from reels_trends.pipeline.daily_summary import NotifySummary
 from reels_trends.pipeline.base import TaskContext, run_pipeline
 from reels_trends.bot import create_bot
 from aiogram import Bot
+from aiogram.types import BotCommand
 from reels_trends.db.models import Base, TaskModel
 from reels_trends.db.session import engine, get_session
 from reels_trends.settings import settings
@@ -151,6 +152,13 @@ async def main() -> None:
     bot, dp = create_bot(settings.TELEGRAM_BOT_TOKEN)
     global _bot
     _bot = bot
+
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Show help"),
+        BotCommand(command="add", description="Track a profile: /add @username"),
+        BotCommand(command="list", description="Show tracked profiles"),
+        BotCommand(command="remove", description="Stop tracking a profile"),
+    ])
 
     def _on_worker_done(task: asyncio.Task) -> None:
         if not task.cancelled() and task.exception():

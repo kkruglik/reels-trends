@@ -2,6 +2,7 @@ from typing import List
 import uuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import (
+    BigInteger,
     Uuid,
     Integer,
     Float,
@@ -55,13 +56,14 @@ class InstagramAccountModel(Base):
 class TaskModel(Base):
     __tablename__ = "tasks"
 
-    __table_args__ = (UniqueConstraint("user_id", "username"),)
+    __table_args__ = (UniqueConstraint("chat_id", "username"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     username: Mapped[str] = mapped_column(
         ForeignKey("instagram_accounts.username"), nullable=False
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     user: Mapped["UserModel"] = relationship("UserModel", back_populates="tasks")
     account: Mapped["InstagramAccountModel"] = relationship(

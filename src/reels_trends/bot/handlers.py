@@ -1,8 +1,7 @@
+import re
 from urllib.parse import urlparse
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -23,10 +22,6 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
-class Form(StatesGroup):
-    waiting_for_profile = State()
-
-
 def _parse_instagram_username(raw: str) -> str:
     raw = raw.strip()
     if raw.startswith("@"):
@@ -36,57 +31,65 @@ def _parse_instagram_username(raw: str) -> str:
     return raw
 
 
-@router.message(Command("start"))
-async def cmd_start(message: Message) -> None:
-    logger.info("start user_id=%s", message.from_user.id)
-    await message.reply(
-        "Instagram Reels Trends tracker\n\n"
-        "/add — start tracking an Instagram profile\n"
-        "/list — show your tracked profiles\n"
-        "/remove — stop tracking a profile"
-    )
+_USERNAME_RE = re.compile(r"^[\w.]{1,30}$")
 
 
-@router.message(Command("add"))
-async def cmd_add(message: Message, state: FSMContext) -> None:
-    logger.info("add user_id=%s", message.from_user.id)
-    await state.set_state(Form.waiting_for_profile)
-    await message.reply(
-        "Send me the Instagram profile URL or username.\n"
-        "Examples: <code>@username</code> or <code>instagram.com/username</code>",
-        parse_mode="HTML",
-    )
+def _parse_usernames(text: str) -> list[str]:
+    tokens = re.split(r"[\s,]+", text.strip())
+    seen = set()
+    result = []
+    for token in tokens:
+        if not token or token.startswith("/"):
+            continue
+        u = _parse_instagram_username(token)
+        if u and _USERNAME_RE.match(u) and u not in seen:
+            seen.add(u)
+            result.append(u)
+    return result
 
 
-@router.message(Form.waiting_for_profile, F.text, ~F.text.startswith("/"))
-async def receive_profile(message: Message, state: FSMContext) -> None:
-    await state.clear()
-    username = _parse_instagram_username(message.text or "")
-    if not username:
-        await message.reply("Please send a valid Instagram username or URL.")
-        await state.set_state(Form.waiting_for_profile)
-        return
-    logger.info("add profile user_id=%s username=%s", message.from_user.id, username)
+async def _add_profile(
+    username: str,
+    chat_id: int,
+    tg_user,
+    http_client: httpx.AsyncClient,
+) -> str:
+    async with get_session() as db_session:
+        task_result = await db_session.execute(
+            select(TaskModel).where(
+                TaskModel.username == username,
+                TaskModel.chat_id == chat_id,
+            )
+        )
+        if task_result.scalar_one_or_none() is not None:
+            return f"@{username} — already tracking"
 
-    await message.reply(f"Validating @{username}...")
+        account_result = await db_session.execute(
+            select(InstagramAccountModel).where(
+                InstagramAccountModel.username == username
+            )
+        )
+        existing_account = account_result.scalar_one_or_none()
 
-    async with httpx.AsyncClient(
-        headers={"Authorization": f"Bearer {settings.APIFY_TOKEN}"},
-        timeout=httpx.Timeout(settings.HTTPX_TIMEOUT),
-    ) as http_client:
+    if existing_account is not None:
+        profile = {
+            "username": existing_account.username,
+            "url": existing_account.url,
+            "id": existing_account.profile_id,
+            "followersCount": existing_account.follower_count,
+            "postsCount": existing_account.total_post_count,
+            "igtvVideoCount": existing_account.total_video_count,
+            "fullName": existing_account.full_name,
+            "verified": existing_account.verified,
+        }
+        logger.info("add profile cache hit chat_id=%s username=%s", chat_id, username)
+    else:
         try:
             profile = await validate_instagram_profile(username, http_client)
         except (ValueError, RuntimeError) as e:
-            logger.warning(
-                "add profile failed user_id=%s username=%s error=%s",
-                message.from_user.id,
-                username,
-                e,
-            )
-            await message.reply(f"Could not validate profile: {e}")
-            return
+            logger.warning("add profile failed chat_id=%s username=%s error=%s", chat_id, username, e)
+            return f"@{username} — failed: {e}"
 
-    tg_user = message.from_user
     async with get_session() as db_session:
         await upsert_to_db(
             db_session,
@@ -113,33 +116,66 @@ async def receive_profile(message: Message, state: FSMContext) -> None:
         )
         await upsert_to_db(
             db_session,
-            [{"username": profile["username"], "user_id": tg_user.id}],
+            [{"username": profile["username"], "user_id": tg_user.id, "chat_id": chat_id}],
             TaskModel,
-            ["user_id", "username"],
+            ["chat_id", "username"],
         )
 
-    full_name = profile.get("fullName") or username
     followers = profile.get("followersCount", 0)
-    posts = profile.get("postsCount", 0)
-    logger.info(
-        "add profile done user_id=%s username=%s", message.from_user.id, username
-    )
+    logger.info("add profile done chat_id=%s username=%s", chat_id, username)
+    return f"@{username} — added ({followers:,} followers)"
+
+
+@router.message(Command("start"))
+async def cmd_start(message: Message) -> None:
+    logger.info("start chat_id=%s", message.chat.id)
     await message.reply(
-        f"Added @{username}\n"
-        f"{full_name} · {followers:,} followers · {posts} posts\n"
-        "Scraping posts every 2 hours, profile daily."
+        "Instagram Reels Trends tracker\n\n"
+        "/add @username — track one or multiple profiles\n"
+        "/list — show tracked profiles\n"
+        "/remove — stop tracking a profile"
     )
+
+
+@router.message(Command("add"))
+async def cmd_add(message: Message) -> None:
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip():
+        await message.reply(
+            "Usage: <code>/add @username1 @username2 ...</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    usernames = _parse_usernames(args[1])
+    if not usernames:
+        await message.reply("Please send valid Instagram usernames or URLs.")
+        return
+
+    if len(usernames) > 1:
+        await message.reply(f"Adding {len(usernames)} profiles...")
+
+    async with httpx.AsyncClient(
+        headers={"Authorization": f"Bearer {settings.APIFY_TOKEN}"},
+        timeout=httpx.Timeout(settings.HTTPX_TIMEOUT),
+    ) as http_client:
+        results = []
+        for username in usernames:
+            logger.info("add profile chat_id=%s username=%s", message.chat.id, username)
+            result = await _add_profile(username, message.chat.id, message.from_user, http_client)
+            results.append(result)
+
+    await message.reply("\n".join(results))
 
 
 @router.message(Command("list"))
 async def cmd_list(message: Message) -> None:
-    logger.info("list user_id=%s", message.from_user.id)
-    tg_user = message.from_user
+    logger.info("list chat_id=%s", message.chat.id)
     async with get_session() as db_session:
-        tasks = await get_all_from_db(db_session, TaskModel, user_id=tg_user.id)
+        tasks = await get_all_from_db(db_session, TaskModel, chat_id=message.chat.id)
 
     if not tasks:
-        await message.reply("No profiles tracked yet. Use /add to start.")
+        await message.reply("No profiles tracked yet. Use /add @username to start.")
         return
 
     lines = [f"@{t.username}" for t in tasks]
@@ -148,13 +184,12 @@ async def cmd_list(message: Message) -> None:
 
 @router.message(Command("remove"))
 async def cmd_remove(message: Message) -> None:
-    logger.info("remove user_id=%s", message.from_user.id)
-    tg_user = message.from_user
+    logger.info("remove chat_id=%s", message.chat.id)
     async with get_session() as db_session:
-        tasks = await get_all_from_db(db_session, TaskModel, user_id=tg_user.id)
+        tasks = await get_all_from_db(db_session, TaskModel, chat_id=message.chat.id)
 
     if not tasks:
-        await message.reply("No profiles tracked. Use /add to start.")
+        await message.reply("No profiles tracked. Use /add @username to start.")
         return
 
     buttons = [
@@ -179,20 +214,19 @@ async def cb_remove(callback: CallbackQuery) -> None:
     username = callback.data.removeprefix("remove:")
 
     if username == "__cancel__":
-        logger.info("remove cancelled user_id=%s", callback.from_user.id)
+        logger.info("remove cancelled chat_id=%s", callback.message.chat.id)
         await callback.message.edit_text("Cancelled.")
         await callback.answer()
         return
 
     logger.info(
-        "remove profile user_id=%s username=%s", callback.from_user.id, username
+        "remove profile chat_id=%s username=%s", callback.message.chat.id, username
     )
-    tg_user = callback.from_user
     async with get_session() as db_session:
         await db_session.execute(
             delete(TaskModel).where(
                 TaskModel.username == username,
-                TaskModel.user_id == tg_user.id,
+                TaskModel.chat_id == callback.message.chat.id,
             )
         )
         await db_session.commit()
@@ -209,7 +243,7 @@ async def cb_remove(callback: CallbackQuery) -> None:
             await db_session.commit()
 
     logger.info(
-        "remove profile done user_id=%s username=%s", callback.from_user.id, username
+        "remove profile done chat_id=%s username=%s", callback.message.chat.id, username
     )
     await callback.message.edit_text(f"Stopped tracking @{username}.")
     await callback.answer()
