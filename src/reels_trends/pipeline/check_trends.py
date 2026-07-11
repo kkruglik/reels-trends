@@ -2,7 +2,6 @@ from asyncio import sleep
 from html import escape
 from reels_trends.pipeline.base import TaskContext, START
 from reels_trends.db.models import ReelsModel, TaskModel
-from reels_trends.settings import settings
 from sqlalchemy import select, update
 from datetime import datetime, timedelta, UTC
 from typing import TypedDict
@@ -19,7 +18,7 @@ def _to_df(posts: list[ReelsModel]) -> pd.DataFrame:
                 "id": p.id,
                 "likes_count": p.likes_count,
                 "comments_count": p.comments_count,
-                "video_view_count": p.video_view_count or 0,
+                "video_view_count": p.video_play_count or p.video_view_count or 0,
                 "posted_at": p.posted_at,
             }
             for p in posts
@@ -27,11 +26,19 @@ def _to_df(posts: list[ReelsModel]) -> pd.DataFrame:
     )
 
 
+class CheckTrendingParams(TypedDict):
+    trending_freshness_hours: int
+    trending_history_limit: int
+    trending_baseline_quantile: float
+    trending_multiplier: float
+
+
 class CheckTrendingState(TypedDict, total=False):
     account_name: str
     candidates: pd.DataFrame
     history: pd.DataFrame
     trending_ids: list
+    params: CheckTrendingParams
 
 
 class FetchTrendingData:
@@ -46,7 +53,8 @@ class FetchTrendingData:
         self, state: CheckTrendingState, ctx: TaskContext
     ) -> CheckTrendingState:
         account = state["account_name"]
-        cutoff = datetime.now(UTC) - timedelta(hours=settings.TRENDING_FRESHNESS_HOURS)
+        p = state["params"]
+        cutoff = datetime.now(UTC) - timedelta(hours=p["trending_freshness_hours"])
 
         candidates_result = await ctx["db_session"].execute(
             select(ReelsModel).where(
@@ -67,7 +75,7 @@ class FetchTrendingData:
             select(ReelsModel)
             .where(ReelsModel.username == account)
             .order_by(ReelsModel.posted_at.desc())
-            .limit(settings.TRENDING_HISTORY_LIMIT)
+            .limit(p["trending_history_limit"])
         )
         history = history_result.scalars().all()
 
@@ -93,6 +101,7 @@ class PredictTrending:
         self, state: CheckTrendingState, ctx: TaskContext
     ) -> CheckTrendingState:
         account = state["account_name"]
+        p = state["params"]
         candidates = state["candidates"].copy()
         history = state["history"].copy()
         now = datetime.now(UTC)
@@ -110,15 +119,9 @@ class PredictTrending:
                 "video_view_count"
             ].clip(lower=1)
 
-        baseline_lph = history["likes_per_hour"].quantile(
-            settings.TRENDING_BASELINE_QUANTILE
-        )
-        baseline_vph = history["views_per_hour"].quantile(
-            settings.TRENDING_BASELINE_QUANTILE
-        )
-        baseline_er = history["engagement_rate"].quantile(
-            settings.TRENDING_BASELINE_QUANTILE
-        )
+        baseline_lph = history["likes_per_hour"].quantile(p["trending_baseline_quantile"])
+        baseline_vph = history["views_per_hour"].quantile(p["trending_baseline_quantile"])
+        baseline_er = history["engagement_rate"].quantile(p["trending_baseline_quantile"])
 
         logger.info(
             "baseline account=%s lph=%.2f vph=%.2f er=%.4f",
@@ -128,21 +131,13 @@ class PredictTrending:
             baseline_er,
         )
 
+        multiplier = p["trending_multiplier"]
         is_trending = (
-            (
-                candidates["likes_per_hour"]
-                >= baseline_lph * settings.TRENDING_MULTIPLIER
-            )
-            | (
-                candidates["views_per_hour"]
-                >= baseline_vph * settings.TRENDING_MULTIPLIER
-            )
+            (candidates["likes_per_hour"] >= baseline_lph * multiplier)
+            | (candidates["views_per_hour"] >= baseline_vph * multiplier)
             | (
                 (candidates["video_view_count"] >= 1000)
-                & (
-                    candidates["engagement_rate"]
-                    >= baseline_er * settings.TRENDING_MULTIPLIER
-                )
+                & (candidates["engagement_rate"] >= baseline_er * multiplier)
             )
         )
 
@@ -203,7 +198,8 @@ class NotifyTrending:
         for chat_id in chat_ids:
             for reel in reels:
                 caption = escape((reel.caption or "")[:120])
-                views = f"{reel.video_view_count:,}" if reel.video_view_count else "—"
+                play_count = reel.video_play_count or reel.video_view_count
+                views = f"{play_count:,}" if play_count else "—"
                 text = (
                     f"🔥 <b>Trending reel from @{account}</b>\n\n"
                     f"{caption}\n\n"

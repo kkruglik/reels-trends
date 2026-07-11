@@ -1,8 +1,7 @@
 from zoneinfo import ZoneInfo
-from reels_trends.pipeline.base import TaskContext, START
+from reels_trends.pipeline.base import TaskContext, START, ApifyBillingError
 from reels_trends.db.utils import upsert_to_db
 from reels_trends.db.models import ReelsModel
-from reels_trends.settings import settings
 from datetime import datetime, timedelta, UTC, time
 from typing import TypedDict, Any, cast
 import asyncio
@@ -22,10 +21,17 @@ class ReelScraperInput(TypedDict, total=False):
     includeDownloadedVideo: bool
 
 
+class ScrapePostsParams(TypedDict):
+    daily_summary_timezone: str
+    scrape_lookback_days: int
+    scrape_results_limit: int
+
+
 class ScrapePostsState(TypedDict, total=False):
     account_name: str
     scrape_posts_apify_task_id: str
     scraped_data: list[Any]
+    params: ScrapePostsParams
 
 
 class ScrapeInstagramPostsStep:
@@ -34,7 +40,7 @@ class ScrapeInstagramPostsStep:
     depends = [START]
 
     def should_apply(self, state: ScrapePostsState) -> bool:
-        now = datetime.now(ZoneInfo(settings.DAILY_SUMMARY_TIMEZONE)).time()
+        now = datetime.now(ZoneInfo(state["params"]["daily_summary_timezone"])).time()
         if now >= time(22, 0) or now < time(7, 0):
             return False
         return True
@@ -43,18 +49,22 @@ class ScrapeInstagramPostsStep:
         self, state: ScrapePostsState, ctx: TaskContext
     ) -> ScrapePostsState:
         account = state["account_name"]
+        p = state["params"]
         cutoff = (
-            datetime.now(UTC) - timedelta(days=settings.SCRAPE_LOOKBACK_DAYS)
+            datetime.now(UTC) - timedelta(days=p["scrape_lookback_days"])
         ).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         payload: ReelScraperInput = {
             "username": [account],
-            "resultsLimit": settings.SCRAPE_RESULTS_LIMIT,
+            "resultsLimit": p["scrape_results_limit"],
             "onlyPostsNewerThan": cutoff,
         }
         response = await ctx["http_client"].post(
             "https://api.apify.com/v2/acts/apify~instagram-reel-scraper/runs",
+            params={"memory": 256},
             json=payload,
         )
+        if response.status_code == 403:
+            raise ApifyBillingError(f"Apify account out of credits: {response.text}")
         response.raise_for_status()
         run_id = response.json()["data"]["id"]
         logger.info("run started account=%s run_id=%s", account, run_id)

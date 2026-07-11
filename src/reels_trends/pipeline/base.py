@@ -9,6 +9,10 @@ logger = logging.getLogger(__name__)
 START = "__start__"
 
 
+class ApifyBillingError(Exception):
+    pass
+
+
 class TaskContext(TypedDict):
     db_session: AsyncSession
     http_client: httpx.AsyncClient
@@ -36,6 +40,9 @@ async def run_pipeline(
         logger.info("start step=%s", step.name)
         try:
             state |= await step.apply(state, ctx)
+        except ApifyBillingError as e:
+            logger.warning("billing error step=%s: %s", step.name, e)
+            return
         except Exception:
             logger.exception("error step=%s", step.name)
             raise

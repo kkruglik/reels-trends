@@ -1,4 +1,4 @@
-from reels_trends.pipeline.base import TaskContext, START
+from reels_trends.pipeline.base import TaskContext, START, ApifyBillingError
 from reels_trends.db.utils import upsert_to_db
 from reels_trends.db.models import InstagramAccountModel
 from typing import TypedDict, Any, cast
@@ -28,8 +28,11 @@ class ScrapeInstagramProfileStep:
         account = state["account_name"]
         response = await ctx["http_client"].post(
             "https://api.apify.com/v2/acts/apify~instagram-profile-scraper/runs",
+            params={"memory": 256},
             json={"usernames": [account]},
         )
+        if response.status_code == 403:
+            raise ApifyBillingError(f"Apify account out of credits: {response.text}")
         response.raise_for_status()
         run_id = response.json()["data"]["id"]
         logger.info("run started account=%s run_id=%s", account, run_id)

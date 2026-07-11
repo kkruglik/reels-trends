@@ -16,7 +16,7 @@ from reels_trends.bot.utils import validate_instagram_profile
 from reels_trends.db.models import UserModel, TaskModel, InstagramAccountModel
 from reels_trends.db.session import get_session
 from reels_trends.db.utils import upsert_to_db, get_all_from_db
-from reels_trends.settings import settings
+from reels_trends.settings import secrets, config
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -156,8 +156,8 @@ async def cmd_add(message: Message) -> None:
         await message.reply(f"Adding {len(usernames)} profiles...")
 
     async with httpx.AsyncClient(
-        headers={"Authorization": f"Bearer {settings.APIFY_TOKEN}"},
-        timeout=httpx.Timeout(settings.HTTPX_TIMEOUT),
+        headers={"Authorization": f"Bearer {secrets.APIFY_TOKEN}"},
+        timeout=httpx.Timeout(config.worker.httpx_timeout),
     ) as http_client:
         results = []
         for username in usernames:

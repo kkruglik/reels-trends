@@ -1,8 +1,8 @@
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from contextlib import asynccontextmanager
-from reels_trends.settings import settings
+from reels_trends.settings import secrets
 
-engine = create_async_engine(settings.DATABASE_URL)
+engine = create_async_engine(secrets.DATABASE_URL)
 AsyncSessionFactory = async_sessionmaker(engine, expire_on_commit=False)
 
 

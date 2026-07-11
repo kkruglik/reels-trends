@@ -1,0 +1,29 @@
+worker:
+  httpx_timeout: 200.0
+  num_workers: 4
+
+scrape:
+  short:
+    interval_minutes: 30
+    lookback_days: 7
+    results_limit: 20
+  history:
+    lookback_days: 30
+    results_limit: 100
+    cron_day_of_week: mon
+
+trends:
+  check_interval_minutes: 10
+  freshness_hours: 12
+  history_limit: 500
+  multiplier: 1.5
+  baseline_quantile: 0.75
+
+profile:
+  cron_hour: 3
+
+summary:
+  cron_hour: 20
+  timezone: Europe/Tallinn
+  lookback_days: 1
+  top_count: 5

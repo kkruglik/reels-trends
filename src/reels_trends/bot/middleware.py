@@ -1,11 +1,11 @@
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject, Message, CallbackQuery
-from reels_trends.settings import settings
+from reels_trends.settings import secrets
 import logging
 
 logger = logging.getLogger(__name__)
 
-_allowed: frozenset[int] = frozenset(settings.TELEGRAM_ALLOWED_USERS)
+_allowed: frozenset[int] = frozenset(secrets.TELEGRAM_ALLOWED_USERS)
 
 
 class WhitelistMiddleware(BaseMiddleware):

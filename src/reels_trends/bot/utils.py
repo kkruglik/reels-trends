@@ -12,6 +12,7 @@ async def validate_instagram_profile(
 ) -> dict:
     response = await http_client.post(
         "https://api.apify.com/v2/acts/apify~instagram-profile-scraper/runs",
+        params={"memory": 256},
         json={"usernames": [username]},
     )
     response.raise_for_status()

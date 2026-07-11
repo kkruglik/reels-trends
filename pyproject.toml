@@ -13,6 +13,7 @@ dependencies = [
   "aiosqlite>=0.21.0",
   "sqlalchemy[asyncio]>=2.0.51",
   "aiogram>=3.20.0",
+  "pyyaml>=6.0.3",
 ]
 
 [project.scripts]

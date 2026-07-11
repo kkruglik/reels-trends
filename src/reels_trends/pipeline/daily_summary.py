@@ -2,7 +2,6 @@ from asyncio import sleep
 from html import escape
 from reels_trends.pipeline.base import TaskContext, START
 from reels_trends.db.models import ReelsModel, TaskModel
-from reels_trends.settings import settings
 from sqlalchemy import select
 from datetime import datetime, timedelta, UTC
 from typing import TypedDict
@@ -11,8 +10,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class DailySummaryParams(TypedDict):
+    summary_lookback_days: int
+    summary_top_count: int
+
+
 class DailySummaryState(TypedDict, total=False):
     account_name: str
+    params: DailySummaryParams
 
 
 class NotifySummary:
@@ -27,8 +32,9 @@ class NotifySummary:
         self, state: DailySummaryState, ctx: TaskContext
     ) -> DailySummaryState:
         account = state["account_name"]
+        p = state["params"]
         session = ctx["db_session"]
-        cutoff = datetime.now(UTC) - timedelta(days=settings.SUMMARY_LOOKBACK_DAYS)
+        cutoff = datetime.now(UTC) - timedelta(days=p["summary_lookback_days"])
 
         reels_result = await session.execute(
             select(ReelsModel)
@@ -36,8 +42,8 @@ class NotifySummary:
                 ReelsModel.username == account,
                 ReelsModel.posted_at > cutoff,
             )
-            .order_by(ReelsModel.video_view_count.desc())
-            .limit(settings.SUMMARY_TOP_COUNT)
+            .order_by(ReelsModel.video_play_count.desc())
+            .limit(p["summary_top_count"])
         )
         reels = reels_result.scalars().all()
 
@@ -54,7 +60,8 @@ class NotifySummary:
             message = f"📊 <b>Daily Top 5 from @{account}</b>\n\n"
             for i, reel in enumerate(reels, 1):
                 caption = escape((reel.caption or "")[:100])
-                views = f"{reel.video_view_count:,}" if reel.video_view_count else "—"
+                play_count = reel.video_play_count or reel.video_view_count
+                views = f"{play_count:,}" if play_count else "—"
                 message += (
                     f"{i}. {caption}\n"
                     f"👍 {reel.likes_count:,} · 💬 {reel.comments_count:,} · 👁 {views}\n"

@@ -1,40 +1,70 @@
+from pathlib import Path
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
+import yaml
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+class Secrets(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     APIFY_TOKEN: str
     DATABASE_URL: str
     TELEGRAM_BOT_TOKEN: str
-
-    # Worker / HTTP
-    HTTPX_TIMEOUT: float
-    NUM_WORKERS: int
-
-    # Scheduler cadence
-    SCRAPE_POSTS_INTERVAL_HOURS: int
-    CHECK_TRENDS_CRON_MINUTE: int
-    SCRAPE_PROFILE_CRON_HOUR: int
-    DAILY_SUMMARY_CRON_HOUR: int
-    DAILY_SUMMARY_TIMEZONE: str
-
-    # Apify scraping
-    SCRAPE_RESULTS_LIMIT: int
-    SCRAPE_LOOKBACK_DAYS: int
-
-    # Trend detection
-    TRENDING_FRESHNESS_HOURS: int
-    TRENDING_HISTORY_LIMIT: int
-    TRENDING_MULTIPLIER: float
-    TRENDING_BASELINE_QUANTILE: float
-
-    # Daily summary
-    SUMMARY_LOOKBACK_DAYS: int
-    SUMMARY_TOP_COUNT: int
-
-    # Access control (empty = allow all)
     TELEGRAM_ALLOWED_USERS: list[int] = []
 
 
-settings = Settings()
+class WorkerConfig(BaseModel):
+    httpx_timeout: float
+    num_workers: int
+
+
+class ScrapeShortConfig(BaseModel):
+    interval_minutes: int
+    lookback_days: int
+    results_limit: int
+
+
+class ScrapeHistoryConfig(BaseModel):
+    lookback_days: int
+    results_limit: int
+    cron_day_of_week: str
+
+
+class ScrapeConfig(BaseModel):
+    short: ScrapeShortConfig
+    history: ScrapeHistoryConfig
+
+
+class TrendsConfig(BaseModel):
+    check_interval_minutes: int
+    freshness_hours: int
+    history_limit: int
+    multiplier: float
+    baseline_quantile: float
+
+
+class ProfileConfig(BaseModel):
+    cron_hour: int
+
+
+class SummaryConfig(BaseModel):
+    cron_hour: int
+    timezone: str
+    lookback_days: int
+    top_count: int
+
+
+class AppConfig(BaseModel):
+    worker: WorkerConfig
+    scrape: ScrapeConfig
+    trends: TrendsConfig
+    profile: ProfileConfig
+    summary: SummaryConfig
+
+
+def _load_config(path: str = "config/config.yaml") -> AppConfig:
+    return AppConfig(**yaml.safe_load(Path(path).read_text()))
+
+
+secrets = Secrets()
+config = _load_config()
