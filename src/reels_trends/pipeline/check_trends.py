@@ -6,6 +6,7 @@ from sqlalchemy import select, update
 from datetime import datetime, timedelta, UTC
 from typing import TypedDict
 import logging
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,12 @@ class CheckTrendingParams(TypedDict):
     trending_history_limit: int
     trending_baseline_quantile: float
     trending_multiplier: float
+    trending_growth_halflife_hours: float
+    trending_maturity_hours: float
+    trending_min_history: int
+    trending_min_age_hours: float
+    trending_min_likes: int
+    trending_min_views: int
 
 
 class CheckTrendingState(TypedDict, total=False):
@@ -112,34 +119,66 @@ class PredictTrending:
                 posted = posted.dt.tz_localize(UTC)
             else:
                 posted = posted.dt.tz_convert(UTC)
-            df["age_hours"] = ((now - posted).dt.total_seconds() / 3600).clip(lower=1)
-            df["likes_per_hour"] = df["likes_count"] / df["age_hours"]
-            df["views_per_hour"] = df["video_view_count"] / df["age_hours"]
+            df["age_hours"] = (now - posted).dt.total_seconds() / 3600
             df["engagement_rate"] = (df["likes_count"] + df["comments_count"]) / df[
                 "video_view_count"
             ].clip(lower=1)
 
-        baseline_lph = history["likes_per_hour"].quantile(p["trending_baseline_quantile"])
-        baseline_vph = history["views_per_hour"].quantile(p["trending_baseline_quantile"])
-        baseline_er = history["engagement_rate"].quantile(p["trending_baseline_quantile"])
+        q = p["trending_baseline_quantile"]
+        multiplier = p["trending_multiplier"]
+        halflife = p["trending_growth_halflife_hours"]
+
+        # g(t) = fraction of a reel's lifetime engagement reached by age `t`.
+        # Projecting a candidate's partial count to its final (count / g(age)) removes
+        # the age bias of raw velocity, so fresh reels compete on projected finals, not
+        # on the mechanical head start of a small denominator.
+        def growth(age: pd.Series) -> pd.Series:
+            return 1.0 - np.power(2.0, -age.clip(lower=0.5) / halflife)
+
+        # Baseline is built from the account's own history, excluding the candidates
+        # themselves. Velocity baselines come from mature reels whose stored counts are
+        # effectively final; engagement_rate is age-independent so it uses all history.
+        hist = history[~history["id"].isin(set(candidates["id"]))]
+        mature = hist[hist["age_hours"] >= p["trending_maturity_hours"]]
+
+        baseline_likes = mature["likes_count"].quantile(q)
+        baseline_views = mature["video_view_count"].quantile(q)
+        baseline_er = hist["engagement_rate"].quantile(q)
+
+        enough_mature = len(mature) >= p["trending_min_history"]
+        enough_hist = len(hist) >= p["trending_min_history"]
 
         logger.info(
-            "baseline account=%s lph=%.2f vph=%.2f er=%.4f",
+            "baseline account=%s mature=%d hist=%d likes=%.0f views=%.0f er=%.4f",
             account,
-            baseline_lph,
-            baseline_vph,
+            len(mature),
+            len(hist),
+            baseline_likes,
+            baseline_views,
             baseline_er,
         )
 
-        multiplier = p["trending_multiplier"]
-        is_trending = (
-            (candidates["likes_per_hour"] >= baseline_lph * multiplier)
-            | (candidates["views_per_hour"] >= baseline_vph * multiplier)
-            | (
-                (candidates["video_view_count"] >= 1000)
-                & (candidates["engagement_rate"] >= baseline_er * multiplier)
-            )
+        g_c = growth(candidates["age_hours"])
+        candidates["proj_likes"] = candidates["likes_count"] / g_c
+        candidates["proj_views"] = candidates["video_view_count"] / g_c
+
+        gate = candidates["age_hours"] >= p["trending_min_age_hours"]
+        likes_hit = (
+            enough_mature
+            & (candidates["likes_count"] >= p["trending_min_likes"])
+            & (candidates["proj_likes"] >= baseline_likes * multiplier)
         )
+        views_hit = (
+            enough_mature
+            & (candidates["video_view_count"] >= p["trending_min_views"])
+            & (candidates["proj_views"] >= baseline_views * multiplier)
+        )
+        er_hit = (
+            enough_hist
+            & (candidates["video_view_count"] >= p["trending_min_views"])
+            & (candidates["engagement_rate"] >= baseline_er * multiplier)
+        )
+        is_trending = gate & (likes_hit | views_hit | er_hit)
 
         candidates.loc[is_trending, "is_trending"] = True
         trending = candidates.loc[is_trending]
@@ -147,10 +186,11 @@ class PredictTrending:
 
         for _, row in trending.iterrows():
             logger.info(
-                "hit account=%s lph=%.2f vph=%.2f er=%.4f",
+                "hit account=%s age=%.1f proj_likes=%.0f proj_views=%.0f er=%.4f",
                 account,
-                row["likes_per_hour"],
-                row["views_per_hour"],
+                row["age_hours"],
+                row["proj_likes"],
+                row["proj_views"],
                 row["engagement_rate"],
             )
 

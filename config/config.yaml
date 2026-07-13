@@ -1,29 +1,56 @@
-worker:
-  httpx_timeout: 200.0
-  num_workers: 4
+pipelines:
+  posts_short:
+    pipeline: posts
+    schedule:
+      kind: interval
+      interval_minutes: 30
+    params:
+      daily_summary_timezone: Europe/Tallinn
+      scrape_lookback_days: 2
+      scrape_results_limit: 20
 
-scrape:
-  short:
-    interval_minutes: 30
-    lookback_days: 7
-    results_limit: 20
-  history:
-    lookback_days: 30
-    results_limit: 100
-    cron_day_of_week: mon
+  posts_history:
+    pipeline: posts
+    schedule:
+      kind: cron
+      hour: 10
+      timezone: Europe/Tallinn
+    params:
+      daily_summary_timezone: Europe/Tallinn
+      scrape_lookback_days: 14
+      scrape_results_limit: 100
 
-trends:
-  check_interval_minutes: 10
-  freshness_hours: 12
-  history_limit: 500
-  multiplier: 1.5
-  baseline_quantile: 0.75
+  trends:
+    pipeline: trends
+    schedule:
+      kind: interval
+      interval_minutes: 10
+    params:
+      trending_freshness_hours: 12
+      trending_history_limit: 500
+      trending_multiplier: 1.5
+      trending_baseline_quantile: 0.75
+      trending_growth_halflife_hours: 24.0 # g(t)=1-2^(-t/H): how front-loaded engagement is
+      trending_maturity_hours: 120.0 # reels older than this count as "final" for the baseline
+      trending_min_history: 8 # min mature sample before a velocity branch may fire
+      trending_min_age_hours: 4.0 # don't classify (or project) reels younger than this
+      trending_min_likes: 50 # absolute floor for the likes branch
+      trending_min_views: 1000 # absolute floor for the views & engagement-rate branches
 
-profile:
-  cron_hour: 3
+  profile:
+    pipeline: profile
+    schedule:
+      kind: cron
+      hour: 3
+      timezone: Europe/Tallinn
+    params: {}
 
-summary:
-  cron_hour: 20
-  timezone: Europe/Tallinn
-  lookback_days: 1
-  top_count: 5
+  summary:
+    pipeline: summary
+    schedule:
+      kind: cron
+      hour: 20
+      timezone: Europe/Tallinn
+    params:
+      summary_lookback_days: 1
+      summary_top_count: 5

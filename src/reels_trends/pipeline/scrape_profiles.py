@@ -108,5 +108,5 @@ class SaveInstagramProfileStep:
             for item in data
         ]
         await upsert_to_db(ctx["db_session"], rows, InstagramAccountModel, "username")
-        logger.info("saved account=%s followers=%d", account, data[0]["followersCount"])
+        logger.info("saved account=%s count=%d", account, len(rows))
         return {}

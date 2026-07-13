@@ -20,7 +20,7 @@ from aiogram import Bot
 from aiogram.types import BotCommand
 from reels_trends.db.models import Base, TaskModel
 from reels_trends.db.session import engine, get_session
-from reels_trends.settings import secrets, config
+from reels_trends.settings import secrets, config, IntervalSchedule
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from asyncio import Semaphore, Queue
 from sqlalchemy import select, distinct
@@ -68,7 +68,7 @@ async def worker() -> None:
                 get_session() as db_session,
                 httpx.AsyncClient(
                     headers={"Authorization": f"Bearer {secrets.APIFY_TOKEN}"},
-                    timeout=httpx.Timeout(config.worker.httpx_timeout),
+                    timeout=httpx.Timeout(secrets.WORKER_HTTPX_TIMEOUT),
                 ) as http_client,
             ):
                 ctx: TaskContext = {
@@ -83,7 +83,10 @@ async def worker() -> None:
                 )
         except Exception:
             logger.exception(
-                "Worker failed username=%s pipeline=%s", username, pipeline
+                "Worker failed username=%s pipeline=%s params=%s",
+                username,
+                pipeline,
+                params,
             )
         finally:
             in_flight.discard((username, pipeline, job_id))
@@ -116,70 +119,27 @@ async def main() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    short_posts_params = {
-        "daily_summary_timezone": config.summary.timezone,
-        "scrape_lookback_days": config.scrape.short.lookback_days,
-        "scrape_results_limit": config.scrape.short.results_limit,
-    }
-    history_posts_params = {
-        "daily_summary_timezone": config.summary.timezone,
-        "scrape_lookback_days": config.scrape.history.lookback_days,
-        "scrape_results_limit": config.scrape.history.results_limit,
-    }
-    trends_params = {
-        "trending_freshness_hours": config.trends.freshness_hours,
-        "trending_history_limit": config.trends.history_limit,
-        "trending_baseline_quantile": config.trends.baseline_quantile,
-        "trending_multiplier": config.trends.multiplier,
-    }
-    summary_params = {
-        "summary_lookback_days": config.summary.lookback_days,
-        "summary_top_count": config.summary.top_count,
-    }
-
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(
-        enqueue,
-        "interval",
-        minutes=config.scrape.short.interval_minutes,
-        args=["posts", short_posts_params, "short"],
-        id="global_posts_short",
-    )
-    scheduler.add_job(
-        enqueue,
-        "cron",
-        day_of_week=config.scrape.history.cron_day_of_week,
-        hour=0,
-        minute=0,
-        args=["posts", history_posts_params, "history"],
-        id="global_posts_history",
-    )
-    scheduler.add_job(
-        enqueue,
-        "interval",
-        minutes=config.trends.check_interval_minutes,
-        args=["trends", trends_params],
-        id="global_trends",
-    )
-    scheduler.add_job(
-        enqueue,
-        "cron",
-        hour=config.profile.cron_hour,
-        minute=0,
-        args=["profile", {}],
-        id="global_profile",
-    )
-    scheduler.add_job(
-        enqueue,
-        "cron",
-        hour=config.summary.cron_hour,
-        minute=0,
-        args=["summary", summary_params],
-        id="global_summary",
-        timezone=config.summary.timezone,
-    )
+    for job_id, job in config.pipelines.items():
+        schedule = job.schedule
+        common = dict(args=[job.pipeline, job.params, job_id], id=f"global_{job_id}")
+        if isinstance(schedule, IntervalSchedule):
+            scheduler.add_job(
+                enqueue, "interval", minutes=schedule.interval_minutes, **common
+            )
+        else:
+            cron = {
+                "hour": schedule.hour,
+                "minute": schedule.minute,
+                "timezone": schedule.timezone,
+            }
+            if schedule.day is not None:
+                cron["day"] = schedule.day
+            if schedule.day_of_week is not None:
+                cron["day_of_week"] = schedule.day_of_week
+            scheduler.add_job(enqueue, "cron", **cron, **common)
     scheduler.start()
-    logger.info("Scheduler started with 4 global jobs")
+    logger.info("Scheduler started with %d jobs", len(config.pipelines))
 
     bot, dp = create_bot(secrets.TELEGRAM_BOT_TOKEN)
     global _bot
@@ -198,10 +158,12 @@ async def main() -> None:
         if not task.cancelled() and task.exception():
             logger.error("worker crashed: %s", task.exception())
 
-    workers = [asyncio.create_task(worker()) for _ in range(config.worker.num_workers)]
+    workers = [asyncio.create_task(worker()) for _ in range(secrets.WORKER_NUM_WORKERS)]
     for w in workers:
         w.add_done_callback(_on_worker_done)
-    await enqueue("posts", short_posts_params, "short")
+
+    first_posts = config.pipelines["posts_history"]
+    await enqueue(first_posts.pipeline, first_posts.params, "startup")
 
     logger.info("Starting bot polling")
     try:
