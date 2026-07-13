@@ -87,7 +87,12 @@ async def _add_profile(
         try:
             profile = await validate_instagram_profile(username, http_client)
         except (ValueError, RuntimeError) as e:
-            logger.warning("add profile failed chat_id=%s username=%s error=%s", chat_id, username, e)
+            logger.warning(
+                "add profile failed chat_id=%s username=%s error=%s",
+                chat_id,
+                username,
+                e,
+            )
             return f"@{username} — failed: {e}"
 
     async with get_session() as db_session:
@@ -116,7 +121,13 @@ async def _add_profile(
         )
         await upsert_to_db(
             db_session,
-            [{"username": profile["username"], "user_id": tg_user.id, "chat_id": chat_id}],
+            [
+                {
+                    "username": profile["username"],
+                    "user_id": tg_user.id,
+                    "chat_id": chat_id,
+                }
+            ],
             TaskModel,
             ["chat_id", "username"],
         )
@@ -162,7 +173,9 @@ async def cmd_add(message: Message) -> None:
         results = []
         for username in usernames:
             logger.info("add profile chat_id=%s username=%s", message.chat.id, username)
-            result = await _add_profile(username, message.chat.id, message.from_user, http_client)
+            result = await _add_profile(
+                username, message.chat.id, message.from_user, http_client
+            )
             results.append(result)
 
     await message.reply("\n".join(results))
