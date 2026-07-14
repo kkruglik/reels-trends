@@ -38,5 +38,8 @@ async def validate_instagram_profile(
     items = results.json()
     if not items:
         raise ValueError("Profile not found")
+    profile = items[0]
+    if "id" not in profile:
+        raise ValueError("Profile not available (private, empty, or restricted)")
     logger.info("Profile validation succeeded username=%s", username)
-    return items[0]
+    return profile

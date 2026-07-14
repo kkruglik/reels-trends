@@ -126,6 +126,13 @@ class SaveInstagramPostsStep:
     ) -> ScrapePostsState:
         account = state["account_name"]
         data = state["scraped_data"]
+        valid = [item for item in data if item.get("id")]
+        skipped = len(data) - len(valid)
+        if skipped:
+            logger.warning("skipped %d item(s) without id account=%s", skipped, account)
+        if not valid:
+            logger.info("no reels to save account=%s", account)
+            return {}
         rows = [
             {
                 "instagram_id": item["id"],
@@ -145,7 +152,7 @@ class SaveInstagramPostsStep:
                 ),
                 "username": item["ownerUsername"],
             }
-            for item in data
+            for item in valid
         ]
         await upsert_to_db(ctx["db_session"], rows, ReelsModel, "instagram_id")
         logger.info("saved account=%s count=%d", account, len(rows))
