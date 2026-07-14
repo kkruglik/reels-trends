@@ -60,7 +60,7 @@ class ScrapeInstagramPostsStep:
         }
         response = await ctx["http_client"].post(
             "https://api.apify.com/v2/acts/apify~instagram-reel-scraper/runs",
-            params={"memory": 256},
+            # params={"memory": 256},
             json=payload,
         )
         if response.status_code == 403:
