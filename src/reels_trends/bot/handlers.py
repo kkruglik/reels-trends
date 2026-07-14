@@ -1,3 +1,4 @@
+from reels_trends.workers import enqueue_one
 import re
 from urllib.parse import urlparse
 from aiogram import Router
@@ -86,6 +87,12 @@ async def _add_profile(
     else:
         try:
             profile = await validate_instagram_profile(username, http_client)
+            params = {
+                "daily_summary_timezone": "Europe/Tallinn",
+                "scrape_lookback_days": 14,
+                "scrape_results_limit": 100,
+            }
+            await enqueue_one("posts", profile["username"], params)
         except (ValueError, RuntimeError) as e:
             logger.warning(
                 "add profile failed chat_id=%s username=%s error=%s",
