@@ -1,7 +1,12 @@
 from asyncio import sleep
 from html import escape
 from reels_trends.pipeline.base import TaskContext, START
-from reels_trends.db.models import ReelsModel, TaskModel
+from reels_trends.db.models import (
+    ReelsModel,
+    ReelSnapshotModel,
+    InstagramAccountModel,
+    TaskModel,
+)
 from sqlalchemy import select, update
 from datetime import datetime, timedelta, UTC
 from typing import TypedDict
@@ -17,6 +22,7 @@ def _to_df(posts: list[ReelsModel]) -> pd.DataFrame:
         [
             {
                 "id": p.id,
+                "instagram_id": p.instagram_id,
                 "likes_count": p.likes_count,
                 "comments_count": p.comments_count,
                 "video_view_count": p.video_play_count or p.video_view_count or 0,
@@ -27,7 +33,23 @@ def _to_df(posts: list[ReelsModel]) -> pd.DataFrame:
     )
 
 
+def _snapshots_to_df(snapshots: list[ReelSnapshotModel]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "instagram_id": s.instagram_id,
+                "captured_at": s.captured_at,
+                "likes_count": s.likes_count,
+                "comments_count": s.comments_count,
+                "video_view_count": s.video_view_count,
+            }
+            for s in snapshots
+        ]
+    )
+
+
 class CheckTrendingParams(TypedDict):
+    trending_algorithm: str  # "projection" | "velocity"
     trending_freshness_hours: int
     trending_history_limit: int
     trending_baseline_quantile: float
@@ -38,12 +60,18 @@ class CheckTrendingParams(TypedDict):
     trending_min_age_hours: float
     trending_min_likes: int
     trending_min_views: int
+    # velocity algorithm only
+    trending_reach_velocity_min: float
+    trending_min_rel_growth: float
+    trending_min_snapshot_span: float
 
 
 class CheckTrendingState(TypedDict, total=False):
     account_name: str
     candidates: pd.DataFrame
     history: pd.DataFrame
+    candidate_snapshots: pd.DataFrame
+    follower_count: int
     trending_ids: list
     params: CheckTrendingParams
 
@@ -92,7 +120,38 @@ class FetchTrendingData:
             len(candidates),
             len(history),
         )
-        return {"candidates": _to_df(candidates), "history": _to_df(history)}
+        out: CheckTrendingState = {
+            "candidates": _to_df(candidates),
+            "history": _to_df(history),
+        }
+
+        # The velocity algorithm additionally needs each candidate's snapshot history
+        # (to measure Δviews/Δt) and the account follower count (to normalize reach).
+        if p.get("trending_algorithm", "projection") == "velocity":
+            candidate_ids = [c.instagram_id for c in candidates]
+            snapshots_result = await ctx["db_session"].execute(
+                select(ReelSnapshotModel)
+                .where(ReelSnapshotModel.instagram_id.in_(candidate_ids))
+                .order_by(ReelSnapshotModel.captured_at.asc())
+            )
+            snapshots = snapshots_result.scalars().all()
+
+            account_row = await ctx["db_session"].execute(
+                select(InstagramAccountModel.follower_count).where(
+                    InstagramAccountModel.username == account
+                )
+            )
+            follower_count = account_row.scalar_one_or_none() or 0
+
+            out["candidate_snapshots"] = _snapshots_to_df(snapshots)
+            out["follower_count"] = follower_count
+            logger.info(
+                "fetched velocity data account=%s snapshots=%d followers=%d",
+                account,
+                len(snapshots),
+                follower_count,
+            )
+        return out
 
 
 class PredictTrending:
@@ -105,6 +164,14 @@ class PredictTrending:
         return candidates is not None and not candidates.empty
 
     async def apply(
+        self, state: CheckTrendingState, ctx: TaskContext
+    ) -> CheckTrendingState:
+        algo = state["params"].get("trending_algorithm", "projection")
+        if algo == "velocity":
+            return await self._predict_velocity(state, ctx)
+        return await self._predict_projection(state, ctx)
+
+    async def _predict_projection(
         self, state: CheckTrendingState, ctx: TaskContext
     ) -> CheckTrendingState:
         account = state["account_name"]
@@ -221,6 +288,169 @@ class PredictTrending:
 
         logger.info(
             "predicted account=%s candidates=%d trending=%d",
+            account,
+            len(candidates),
+            len(trending_ids),
+        )
+        return {"trending_ids": trending_ids}
+
+    async def _predict_velocity(
+        self, state: CheckTrendingState, ctx: TaskContext
+    ) -> CheckTrendingState:
+        account = state["account_name"]
+        p = state["params"]
+        candidates = state["candidates"].copy()
+        history = state["history"].copy()
+        snaps = state.get("candidate_snapshots")
+        snaps = snaps.copy() if snaps is not None else pd.DataFrame(
+            columns=[
+                "instagram_id",
+                "captured_at",
+                "likes_count",
+                "comments_count",
+                "video_view_count",
+            ]
+        )
+        follower_count = state.get("follower_count", 0) or 0
+        now = datetime.now(UTC)
+
+        def _utc(s: pd.Series) -> pd.Series:
+            return s.dt.tz_localize(UTC) if s.dt.tz is None else s.dt.tz_convert(UTC)
+
+        # Candidate current state (level) comes from the reels row; velocity comes from
+        # the snapshot pair below. reach/er are age-independent so they need no snapshots.
+        candidates["age_hours"] = (
+            now - _utc(candidates["posted_at"])
+        ).dt.total_seconds() / 3600
+        candidates["engagement_rate"] = (
+            candidates["likes_count"] + candidates["comments_count"]
+        ) / candidates["video_view_count"].clip(lower=1)
+        candidates["reach"] = (
+            candidates["video_view_count"] / follower_count if follower_count else 0.0
+        )
+
+        # Per-account baselines from mature history, excluding the candidates themselves.
+        q = p["trending_baseline_quantile"]
+        multiplier = p["trending_multiplier"]
+        hist = history[~history["id"].isin(set(candidates["id"]))].copy()
+        if not hist.empty:
+            hist["age_hours"] = (
+                now - _utc(hist["posted_at"])
+            ).dt.total_seconds() / 3600
+            hist["engagement_rate"] = (
+                hist["likes_count"] + hist["comments_count"]
+            ) / hist["video_view_count"].clip(lower=1)
+            hist["reach"] = (
+                hist["video_view_count"] / follower_count if follower_count else 0.0
+            )
+        mature = (
+            hist[hist["age_hours"] >= p["trending_maturity_hours"]]
+            if not hist.empty
+            else hist
+        )
+        thr_reach = (
+            mature["reach"].quantile(q) * multiplier if not mature.empty else float("inf")
+        )
+        thr_er = (
+            hist["engagement_rate"].quantile(q) * multiplier
+            if not hist.empty
+            else float("inf")
+        )
+        enough_mature = len(mature) >= p["trending_min_history"]
+        enough_hist = len(hist) >= p["trending_min_history"]
+
+        if not snaps.empty:
+            snaps["captured_at"] = _utc(snaps["captured_at"])
+
+        logger.info(
+            "baseline(velocity) account=%s mature=%d hist=%d followers=%d "
+            "thr_reach=%.4f thr_er=%.4f",
+            account,
+            len(mature),
+            len(hist),
+            follower_count,
+            thr_reach,
+            thr_er,
+        )
+
+        min_span = p["trending_min_snapshot_span"]
+        min_growth = p["trending_min_rel_growth"]
+        reach_vel_min = p["trending_reach_velocity_min"]
+        trending_ids = []
+
+        for _, c in candidates.iterrows():
+            views = int(c["video_view_count"])
+            age = float(c["age_hours"])
+            er = float(c["engagement_rate"])
+            reach = float(c["reach"])
+
+            cs = snaps[snaps["instagram_id"] == c["instagram_id"]].sort_values(
+                "captured_at"
+            )
+            n_snap = len(cs)
+            view_velocity = reach_velocity = rel_growth = span = 0.0
+            if n_snap >= 2:
+                prev, last = cs.iloc[-2], cs.iloc[-1]
+                span = (
+                    last["captured_at"] - prev["captured_at"]
+                ).total_seconds() / 3600
+                if span > 0:
+                    dviews = last["video_view_count"] - prev["video_view_count"]
+                    view_velocity = dviews / span
+                    reach_velocity = (
+                        view_velocity / follower_count if follower_count else 0.0
+                    )
+                    prev_v = max(int(prev["video_view_count"]), 1)
+                    rel_growth = dviews / prev_v / span
+
+            # Velocity-gated: no measurable velocity (<2 snapshots) => never trending.
+            eligible = (
+                n_snap >= 2
+                and span >= min_span
+                and age >= p["trending_min_age_hours"]
+                and views >= p["trending_min_views"]
+            )
+            climbing = rel_growth >= min_growth
+            velocity_hit = bool(follower_count) and reach_velocity >= reach_vel_min
+            reach_hit = enough_mature and bool(follower_count) and reach >= thr_reach
+            er_hit = enough_hist and views >= p["trending_min_views"] and er >= thr_er
+            is_trending = eligible and climbing and (
+                velocity_hit or reach_hit or er_hit
+            )
+
+            logger.info(
+                "vaudit account=%s id=%s age=%.1fh snaps=%d span=%.2fh eligible=%s "
+                "views=%d view_vel=%.0f reach_vel=%.5f reach_vel_min=%.5f velocity_hit=%s "
+                "rel_growth=%.4f min_growth=%.4f climbing=%s "
+                "reach=%.4f thr_reach=%.4f reach_hit=%s "
+                "er=%.4f thr_er=%.4f er_hit=%s -> trending=%s",
+                account,
+                c["id"],
+                age,
+                n_snap,
+                span,
+                bool(eligible),
+                views,
+                view_velocity,
+                reach_velocity,
+                reach_vel_min,
+                bool(velocity_hit),
+                rel_growth,
+                min_growth,
+                bool(climbing),
+                reach,
+                thr_reach,
+                bool(reach_hit),
+                er,
+                thr_er,
+                bool(er_hit),
+                bool(is_trending),
+            )
+            if is_trending:
+                trending_ids.append(c["id"])
+
+        logger.info(
+            "predicted(velocity) account=%s candidates=%d trending=%d",
             account,
             len(candidates),
             len(trending_ids),

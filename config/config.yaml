@@ -8,6 +8,7 @@ pipelines:
       daily_summary_timezone: Europe/Tallinn
       scrape_lookback_days: 2
       scrape_results_limit: 20
+      snapshot_retention_days: 7 # prune reel_snapshots for reels older than this
 
   posts_history:
     pipeline: posts
@@ -19,6 +20,7 @@ pipelines:
       daily_summary_timezone: Europe/Tallinn
       scrape_lookback_days: 14
       scrape_results_limit: 100
+      snapshot_retention_days: 7 # prune reel_snapshots for reels older than this
 
   trends:
     pipeline: trends
@@ -26,16 +28,21 @@ pipelines:
       kind: interval
       interval_minutes: 10
     params:
+      trending_algorithm: projection # "projection" (legacy single-snapshot, live) | "velocity" (measured Δviews/Δt, switch on after snapshots accrue + calibration)
       trending_freshness_hours: 12
       trending_history_limit: 500
       trending_multiplier: 1.5
       trending_baseline_quantile: 0.75
-      trending_growth_halflife_hours: 24.0 # g(t)=1-2^(-t/H): how front-loaded engagement is
+      trending_growth_halflife_hours: 24.0 # [projection] g(t)=1-2^(-t/H): how front-loaded engagement is
       trending_maturity_hours: 120.0 # reels older than this count as "final" for the baseline
-      trending_min_history: 8 # min mature sample before a velocity branch may fire
-      trending_min_age_hours: 1.0 # don't classify (or project) reels younger than this
-      trending_min_likes: 50 # absolute floor for the likes branch
-      trending_min_views: 1000 # absolute floor for the views & engagement-rate branches
+      trending_min_history: 8 # min mature sample before a baseline branch may fire
+      trending_min_age_hours: 1.0 # don't classify reels younger than this
+      trending_min_likes: 50 # [projection] absolute floor for the likes branch
+      trending_min_views: 1000 # absolute floor for the views/reach/engagement-rate branches
+      # velocity algorithm
+      trending_reach_velocity_min: 0.05 # fraction of followers reached per hour (calibrate after ~1 day of snapshots)
+      trending_min_rel_growth: 0.10 # momentum floor (fractional views growth/hr) — reel must still be climbing
+      trending_min_snapshot_span: 0.3 # min hours between the two snapshots used to measure velocity
 
   profile:
     pipeline: profile

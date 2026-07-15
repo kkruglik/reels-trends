@@ -1,7 +1,8 @@
 from zoneinfo import ZoneInfo
 from reels_trends.pipeline.base import TaskContext, START, ApifyBillingError
-from reels_trends.db.utils import upsert_to_db
-from reels_trends.db.models import ReelsModel
+from reels_trends.db.utils import insert_to_db, upsert_to_db
+from reels_trends.db.models import ReelsModel, ReelSnapshotModel
+from sqlalchemy import delete, select
 from datetime import datetime, timedelta, UTC, time
 from typing import TypedDict, Any, cast
 import asyncio
@@ -25,6 +26,7 @@ class ScrapePostsParams(TypedDict):
     daily_summary_timezone: str
     scrape_lookback_days: int
     scrape_results_limit: int
+    snapshot_retention_days: int
 
 
 class ScrapePostsState(TypedDict, total=False):
@@ -156,4 +158,58 @@ class SaveInstagramPostsStep:
         ]
         await upsert_to_db(ctx["db_session"], rows, ReelsModel, "instagram_id")
         logger.info("saved account=%s count=%d", account, len(rows))
+        return {}
+
+
+class SaveReelSnapshotsStep:
+    """Append one time-series snapshot per scraped reel, then prune snapshots for
+    reels older than the retention window. Runs after the reels themselves are saved
+    so the instagram_id FK targets already exist."""
+
+    name = "save_reel_snapshots"
+    retry_count = 3
+    depends = ["save_instagram_posts"]
+
+    def should_apply(self, state: ScrapePostsState) -> bool:
+        return bool(state.get("scraped_data"))
+
+    async def apply(
+        self, state: ScrapePostsState, ctx: TaskContext
+    ) -> ScrapePostsState:
+        account = state["account_name"]
+        p = state["params"]
+        captured_at = datetime.now(UTC)
+        rows = [
+            {
+                "instagram_id": item["id"],
+                "captured_at": captured_at,
+                "likes_count": item["likesCount"],
+                "comments_count": item["commentsCount"],
+                "video_view_count": (
+                    item.get("videoPlayCount") or item.get("videoViewCount") or 0
+                ),
+            }
+            for item in state["scraped_data"]
+            if item.get("id")
+        ]
+        if not rows:
+            return {}
+        await insert_to_db(ctx["db_session"], rows, ReelSnapshotModel)
+
+        cutoff = captured_at - timedelta(days=p["snapshot_retention_days"])
+        stale_reels = select(ReelsModel.instagram_id).where(
+            ReelsModel.posted_at < cutoff
+        )
+        result = await ctx["db_session"].execute(
+            delete(ReelSnapshotModel).where(
+                ReelSnapshotModel.instagram_id.in_(stale_reels)
+            )
+        )
+        await ctx["db_session"].commit()
+        logger.info(
+            "snapshots account=%s saved=%d pruned=%d",
+            account,
+            len(rows),
+            result.rowcount,
+        )
         return {}

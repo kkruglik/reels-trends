@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     JSON,
     ForeignKey,
+    Index,
     UniqueConstraint,
 )
 from datetime import datetime, UTC
@@ -97,3 +98,26 @@ class ReelsModel(Base):
     account: Mapped["InstagramAccountModel"] = relationship(
         "InstagramAccountModel", back_populates="reels"
     )
+
+
+class ReelSnapshotModel(Base):
+    """Time-series row: one per reel per scrape cycle. Append-only; never updated.
+    Powers measured velocity in the trends pipeline (vs. the projection algorithm's
+    single-snapshot extrapolation). Keyed by instagram_id, the natural key the posts
+    pipeline already upserts on, so no post-upsert UUID lookup is needed."""
+
+    __tablename__ = "reel_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    instagram_id: Mapped[str] = mapped_column(
+        ForeignKey("reels.instagram_id", ondelete="CASCADE"), nullable=False
+    )
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    likes_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    comments_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    # play or view count, coalesced at write time
+    video_view_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (Index("ix_snap_ig_time", "instagram_id", "captured_at"),)
