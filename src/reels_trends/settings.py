@@ -16,6 +16,7 @@ class Secrets(BaseSettings):
     TELEGRAM_ALLOWED_USERS: list[int] = []
     WORKER_HTTPX_TIMEOUT: float = 200.0
     WORKER_NUM_WORKERS: int = 4
+    LOG_DIR: str = "logs"
 
 
 class IntervalSchedule(BaseModel):

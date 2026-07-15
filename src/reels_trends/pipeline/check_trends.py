@@ -158,41 +158,66 @@ class PredictTrending:
             baseline_er,
         )
 
+        thr_likes = baseline_likes * multiplier
+        thr_views = baseline_views * multiplier
+        thr_er = baseline_er * multiplier
+
         g_c = growth(candidates["age_hours"])
         candidates["proj_likes"] = candidates["likes_count"] / g_c
         candidates["proj_views"] = candidates["video_view_count"] / g_c
 
-        gate = candidates["age_hours"] >= p["trending_min_age_hours"]
-        likes_hit = (
+        candidates["gate"] = candidates["age_hours"] >= p["trending_min_age_hours"]
+        candidates["likes_hit"] = (
             enough_mature
             & (candidates["likes_count"] >= p["trending_min_likes"])
-            & (candidates["proj_likes"] >= baseline_likes * multiplier)
+            & (candidates["proj_likes"] >= thr_likes)
         )
-        views_hit = (
+        candidates["views_hit"] = (
             enough_mature
             & (candidates["video_view_count"] >= p["trending_min_views"])
-            & (candidates["proj_views"] >= baseline_views * multiplier)
+            & (candidates["proj_views"] >= thr_views)
         )
-        er_hit = (
+        candidates["er_hit"] = (
             enough_hist
             & (candidates["video_view_count"] >= p["trending_min_views"])
-            & (candidates["engagement_rate"] >= baseline_er * multiplier)
+            & (candidates["engagement_rate"] >= thr_er)
         )
-        is_trending = gate & (likes_hit | views_hit | er_hit)
+        candidates["is_trending"] = candidates["gate"] & (
+            candidates["likes_hit"] | candidates["views_hit"] | candidates["er_hit"]
+        )
 
-        candidates.loc[is_trending, "is_trending"] = True
-        trending = candidates.loc[is_trending]
-        trending_ids = list(trending["id"])
-
-        for _, row in trending.iterrows():
+        # Per-reel audit trail: log every evaluated candidate with its computed values
+        # and the thresholds it was compared against, so a trending/non-trending
+        # decision can be reconstructed after the fact.
+        for _, row in candidates.iterrows():
             logger.info(
-                "hit account=%s age=%.1f proj_likes=%.0f proj_views=%.0f er=%.4f",
+                "audit account=%s id=%s age=%.1fh gate=%s "
+                "likes=%d proj_likes=%.0f thr_likes=%.0f likes_hit=%s "
+                "views=%d proj_views=%.0f thr_views=%.0f views_hit=%s "
+                "er=%.4f thr_er=%.4f er_hit=%s "
+                "enough_mature=%s enough_hist=%s -> trending=%s",
                 account,
+                row["id"],
                 row["age_hours"],
+                bool(row["gate"]),
+                int(row["likes_count"]),
                 row["proj_likes"],
+                thr_likes,
+                bool(row["likes_hit"]),
+                int(row["video_view_count"]),
                 row["proj_views"],
+                thr_views,
+                bool(row["views_hit"]),
                 row["engagement_rate"],
+                thr_er,
+                bool(row["er_hit"]),
+                enough_mature,
+                enough_hist,
+                bool(row["is_trending"]),
             )
+
+        trending = candidates.loc[candidates["is_trending"]]
+        trending_ids = list(trending["id"])
 
         logger.info(
             "predicted account=%s candidates=%d trending=%d",

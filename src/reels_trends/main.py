@@ -4,6 +4,8 @@ from reels_trends.db.models import Base
 from reels_trends.db.session import engine
 from reels_trends.settings import secrets, config, IntervalSchedule
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
 import asyncio
 import logging
 
@@ -11,10 +13,21 @@ logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
+    log_dir = Path(secrets.LOG_DIR)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    file_handler = TimedRotatingFileHandler(
+        log_dir / "reels_trends.log",
+        when="midnight",
+        backupCount=14,
+        utc=False,
+        encoding="utf-8",
+    )
+    file_handler.suffix = "%Y-%m-%d"
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(module)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S",
+        handlers=[logging.StreamHandler(), file_handler],
         force=True,
     )
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
