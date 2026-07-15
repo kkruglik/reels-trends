@@ -17,6 +17,7 @@ class Secrets(BaseSettings):
     WORKER_HTTPX_TIMEOUT: float = 200.0
     WORKER_NUM_WORKERS: int = 4
     LOG_DIR: str = "logs"
+    SCRAPE_HISTORY_ON_STARTUP: bool = False
 
 
 class IntervalSchedule(BaseModel):

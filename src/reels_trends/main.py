@@ -69,8 +69,11 @@ async def main() -> None:
     for w in workers:
         w.add_done_callback(_on_worker_done)
 
-    first_posts = config.pipelines["posts_history"]
-    await enqueue_all(first_posts.pipeline, first_posts.params, "startup")
+    if secrets.SCRAPE_HISTORY_ON_STARTUP:
+        first_posts = config.pipelines["posts_history"]
+        await enqueue_all(first_posts.pipeline, first_posts.params, "startup")
+    else:
+        logger.info("Skipping startup history scrape (SCRAPE_HISTORY_ON_STARTUP=False)")
 
     logger.info("Starting bot polling")
     try:
