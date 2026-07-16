@@ -63,7 +63,7 @@ async def _add_profile(
             )
         )
         if task_result.scalar_one_or_none() is not None:
-            return f"@{username} — already tracking"
+            return f"{username} — already tracking"
 
         account_result = await db_session.execute(
             select(InstagramAccountModel).where(
@@ -100,7 +100,7 @@ async def _add_profile(
                 username,
                 e,
             )
-            return f"@{username} — failed: {e}"
+            return f"{username} — failed: {e}"
 
     async with get_session() as db_session:
         await upsert_to_db(
@@ -141,7 +141,7 @@ async def _add_profile(
 
     followers = profile.get("followersCount", 0)
     logger.info("add profile done chat_id=%s username=%s", chat_id, username)
-    return f"@{username} — added ({followers:,} followers)"
+    return f"{username} — added ({followers:,} followers)"
 
 
 @router.message(Command("start"))
@@ -149,7 +149,7 @@ async def cmd_start(message: Message) -> None:
     logger.info("start chat_id=%s", message.chat.id)
     await message.reply(
         "Instagram Reels Trends tracker\n\n"
-        "/add @username — track one or multiple profiles\n"
+        "/add username — track one or multiple profiles\n"
         "/list — show tracked profiles\n"
         "/remove — stop tracking a profile"
     )
@@ -195,10 +195,10 @@ async def cmd_list(message: Message) -> None:
         tasks = await get_all_from_db(db_session, TaskModel, chat_id=message.chat.id)
 
     if not tasks:
-        await message.reply("No profiles tracked yet. Use /add @username to start.")
+        await message.reply("No profiles tracked yet. Use /add username to start.")
         return
 
-    lines = [f"@{t.username}" for t in tasks]
+    lines = [f"https://www.instagram.com/{t.username}/" for t in tasks]
     await message.reply("Tracked profiles:\n" + "\n".join(lines))
 
 
@@ -209,13 +209,13 @@ async def cmd_remove(message: Message) -> None:
         tasks = await get_all_from_db(db_session, TaskModel, chat_id=message.chat.id)
 
     if not tasks:
-        await message.reply("No profiles tracked. Use /add @username to start.")
+        await message.reply("No profiles tracked. Use /add username to start.")
         return
 
     buttons = [
         [
             InlineKeyboardButton(
-                text=f"@{t.username}", callback_data=f"remove:{t.username}"
+                text=t.username, callback_data=f"remove:{t.username}"
             )
         ]
         for t in tasks
@@ -265,5 +265,5 @@ async def cb_remove(callback: CallbackQuery) -> None:
     logger.info(
         "remove profile done chat_id=%s username=%s", callback.message.chat.id, username
     )
-    await callback.message.edit_text(f"Stopped tracking @{username}.")
+    await callback.message.edit_text(f"Stopped tracking {username}.")
     await callback.answer()

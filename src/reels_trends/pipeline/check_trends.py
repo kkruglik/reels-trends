@@ -7,6 +7,11 @@ from reels_trends.db.models import (
     InstagramAccountModel,
     TaskModel,
 )
+from reels_trends.telegram_format import (
+    TELEGRAM_MAX_MESSAGE_LENGTH,
+    utf16_len,
+    escape_and_truncate_caption,
+)
 from sqlalchemy import select, update
 from datetime import datetime, timedelta, UTC
 from typing import TypedDict
@@ -15,6 +20,23 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# Real Instagram reel URLs are ~40-60 chars; this cap just bounds the fixed
+# (non-caption) part of the message so the length budget below can't go negative.
+_MAX_URL_LEN = 200
+
+
+def _format_trending_message(account: str, reel: ReelsModel, views: str) -> str:
+    url = escape((reel.url or "")[:_MAX_URL_LEN])
+    header = f"🔥 <b>Trending reel from {escape(account)}</b>\n\n"
+    tail = (
+        f"\n\n👍 {reel.likes_count:,} · 💬 {reel.comments_count:,} · 👁 {views}\n\n"
+        f'<a href="{url}">Watch reel</a>'
+    )
+    budget = max(TELEGRAM_MAX_MESSAGE_LENGTH - utf16_len(header) - utf16_len(tail), 0)
+    caption = escape_and_truncate_caption(reel.caption or "", budget)
+
+    return f"{header}{caption}{tail}"
 
 
 def _to_df(posts: list[ReelsModel]) -> pd.DataFrame:
@@ -492,15 +514,9 @@ class NotifyTrending:
 
         for chat_id in chat_ids:
             for reel in reels:
-                caption = escape((reel.caption or "")[:120])
                 play_count = reel.video_play_count or reel.video_view_count
                 views = f"{play_count:,}" if play_count else "—"
-                text = (
-                    f"🔥 <b>Trending reel from @{account}</b>\n\n"
-                    f"{caption}\n\n"
-                    f"👍 {reel.likes_count:,} · 💬 {reel.comments_count:,} · 👁 {views}\n\n"
-                    f'<a href="{reel.url}">Watch reel</a>'
-                )
+                text = _format_trending_message(account, reel, views)
                 await ctx["bot"].send_message(chat_id, text, parse_mode="HTML")
                 await sleep(0.5)
 

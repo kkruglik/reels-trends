@@ -2,12 +2,20 @@ from asyncio import sleep
 from html import escape
 from reels_trends.pipeline.base import TaskContext, START
 from reels_trends.db.models import ReelsModel, TaskModel
+from reels_trends.telegram_format import (
+    TELEGRAM_MAX_MESSAGE_LENGTH,
+    utf16_len,
+    escape_and_truncate_caption,
+)
 from sqlalchemy import select
 from datetime import datetime, timedelta, UTC
 from typing import TypedDict
 import logging
 
 logger = logging.getLogger(__name__)
+
+_CAPTION_BUDGET = 100
+_MAX_URL_LEN = 200
 
 
 class DailySummaryParams(TypedDict):
@@ -57,16 +65,20 @@ class NotifySummary:
         chat_ids = chat_ids_result.scalars().all()
 
         for chat_id in chat_ids:
-            message = f"📊 <b>Daily Top 5 from @{account}</b>\n\n"
+            message = f"📊 <b>Daily Top 5 from {escape(account)}</b>\n\n"
             for i, reel in enumerate(reels, 1):
-                caption = escape((reel.caption or "")[:100])
+                caption = escape_and_truncate_caption(reel.caption or "", _CAPTION_BUDGET)
                 play_count = reel.video_play_count or reel.video_view_count
                 views = f"{play_count:,}" if play_count else "—"
-                message += (
+                url = escape((reel.url or "")[:_MAX_URL_LEN])
+                item = (
                     f"{i}. {caption}\n"
                     f"👍 {reel.likes_count:,} · 💬 {reel.comments_count:,} · 👁 {views}\n"
-                    f'<a href="{reel.url}">Watch</a>\n\n'
+                    f'<a href="{url}">Watch</a>\n\n'
                 )
+                if utf16_len(message) + utf16_len(item) > TELEGRAM_MAX_MESSAGE_LENGTH:
+                    break
+                message += item
             await ctx["bot"].send_message(chat_id, message, parse_mode="HTML")
             await sleep(0.5)
 
