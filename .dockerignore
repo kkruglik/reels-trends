@@ -1,6 +1,7 @@
 .env
 *.db
 data/
+config/
 .venv/
 .git/
 .ruff_cache/
