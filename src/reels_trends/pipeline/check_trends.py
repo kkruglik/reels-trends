@@ -436,9 +436,11 @@ class PredictTrending:
             velocity_hit = bool(follower_count) and reach_velocity >= reach_vel_min
             reach_hit = enough_mature and bool(follower_count) and reach >= thr_reach
             er_hit = enough_hist and views >= p["trending_min_views"] and er >= thr_er
-            is_trending = eligible and climbing and (
-                velocity_hit or reach_hit or er_hit
-            )
+            # er_hit bypasses the climbing gate: engagement rate is age-independent by
+            # construction, so a reel with genuinely strong ER shouldn't be discarded
+            # just because its view growth has since plateaued. velocity_hit/reach_hit
+            # are about growth, so they still require the reel to still be climbing.
+            is_trending = eligible and (climbing and (velocity_hit or reach_hit) or er_hit)
 
             logger.info(
                 "vaudit account=%s id=%s age=%.1fh snaps=%d span=%.2fh eligible=%s "

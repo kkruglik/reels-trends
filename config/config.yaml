@@ -41,7 +41,7 @@ pipelines:
       trending_min_views: 1000 # absolute floor for the views/reach/engagement-rate branches
       # velocity algorithm
       trending_reach_velocity_min: 0.05 # fraction of followers reached per hour (calibrate after ~1 day of snapshots)
-      trending_min_rel_growth: 0.10 # momentum floor (fractional views growth/hr) — reel must still be climbing
+      trending_min_rel_growth: 0.05 # momentum floor (fractional views growth/hr) — reel must still be climbing
       trending_min_snapshot_span: 0.3 # min hours between the two snapshots used to measure velocity
 
   profile:
