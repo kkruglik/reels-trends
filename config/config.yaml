@@ -28,7 +28,7 @@ pipelines:
       kind: interval
       interval_minutes: 10
     params:
-      trending_algorithm: projection # "projection" (legacy single-snapshot, live) | "velocity" (measured Δviews/Δt, switch on after snapshots accrue + calibration)
+      trending_algorithm: velocity # "velocity" (measured Δviews/Δt, live) | "projection" (legacy single-snapshot, fallback)
       trending_freshness_hours: 12
       trending_history_limit: 500
       trending_multiplier: 1.5
