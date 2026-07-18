@@ -55,7 +55,19 @@ def _to_df(posts: list[ReelsModel]) -> pd.DataFrame:
     )
 
 
+_SNAPSHOT_COLUMNS = [
+    "instagram_id",
+    "captured_at",
+    "likes_count",
+    "comments_count",
+    "video_view_count",
+]
+
+
 def _snapshots_to_df(snapshots: list[ReelSnapshotModel]) -> pd.DataFrame:
+    # Explicit columns= so an empty snapshot list still yields a DataFrame with the
+    # expected schema (a plain pd.DataFrame([]) has zero columns), which
+    # _predict_velocity's snaps["instagram_id"] lookup depends on.
     return pd.DataFrame(
         [
             {
@@ -66,7 +78,8 @@ def _snapshots_to_df(snapshots: list[ReelSnapshotModel]) -> pd.DataFrame:
                 "video_view_count": s.video_view_count,
             }
             for s in snapshots
-        ]
+        ],
+        columns=_SNAPSHOT_COLUMNS,
     )
 
 
@@ -86,6 +99,7 @@ class CheckTrendingParams(TypedDict):
     trending_reach_velocity_min: float
     trending_min_rel_growth: float
     trending_min_snapshot_span: float
+    trending_velocity_window_hours: float
 
 
 class CheckTrendingState(TypedDict, total=False):
@@ -317,7 +331,7 @@ class PredictTrending:
         return {"trending_ids": trending_ids}
 
     async def _predict_velocity(
-        self, state: CheckTrendingState, ctx: TaskContext
+        self, state: CheckTrendingState, ctx: TaskContext, now: datetime | None = None
     ) -> CheckTrendingState:
         account = state["account_name"]
         p = state["params"]
@@ -334,7 +348,7 @@ class PredictTrending:
             ]
         )
         follower_count = state.get("follower_count", 0) or 0
-        now = datetime.now(UTC)
+        now = now or datetime.now(UTC)
 
         def _utc(s: pd.Series) -> pd.Series:
             return s.dt.tz_localize(UTC) if s.dt.tz is None else s.dt.tz_convert(UTC)
@@ -412,7 +426,18 @@ class PredictTrending:
             n_snap = len(cs)
             view_velocity = reach_velocity = rel_growth = span = 0.0
             if n_snap >= 2:
-                prev, last = cs.iloc[-2], cs.iloc[-1]
+                # Fixed lookback window instead of literally the previous scrape: the
+                # gap between consecutive snapshots varies wildly with scrape cadence
+                # (~1.5min back-to-back runs up to 24h+ across the overnight pause),
+                # which makes a raw "last two" velocity reading noisy. Anchor "prev" to
+                # ~trending_velocity_window_hours ago instead, falling back to the
+                # oldest snapshot if the reel isn't old enough yet.
+                last = cs.iloc[-1]
+                target_time = last["captured_at"] - timedelta(
+                    hours=p["trending_velocity_window_hours"]
+                )
+                older = cs[cs["captured_at"] <= target_time]
+                prev = older.iloc[-1] if not older.empty else cs.iloc[0]
                 span = (
                     last["captured_at"] - prev["captured_at"]
                 ).total_seconds() / 3600

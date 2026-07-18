@@ -34,7 +34,7 @@ pipelines:
       trending_multiplier: 1.5
       trending_baseline_quantile: 0.75
       trending_growth_halflife_hours: 24.0 # [projection] g(t)=1-2^(-t/H): how front-loaded engagement is
-      trending_maturity_hours: 120.0 # reels older than this count as "final" for the baseline
+      trending_maturity_hours: 24.0 # reels older than this count as "final" for the baseline (~89% of eventual views land by 24h per observed growth curve)
       trending_min_history: 8 # min mature sample before a baseline branch may fire
       trending_min_age_hours: 1.0 # don't classify reels younger than this
       trending_min_likes: 50 # [projection] absolute floor for the likes branch
@@ -43,6 +43,7 @@ pipelines:
       trending_reach_velocity_min: 0.05 # fraction of followers reached per hour (calibrate after ~1 day of snapshots)
       trending_min_rel_growth: 0.05 # momentum floor (fractional views growth/hr) — reel must still be climbing
       trending_min_snapshot_span: 0.3 # min hours between the two snapshots used to measure velocity
+      trending_velocity_window_hours: 4.0 # how far back to look for the "prev" snapshot; a fixed window instead of whatever the scrape cadence happened to produce (avoids noisy near-duplicate-snapshot spikes)
 
   profile:
     pipeline: profile
