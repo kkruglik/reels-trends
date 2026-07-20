@@ -1,6 +1,14 @@
+from reels_trends.settings import secrets
+from google.cloud import bigquery
+import pandas as pd
 from zoneinfo import ZoneInfo
 from reels_trends.pipeline.base import TaskContext, START, ApifyBillingError
-from reels_trends.db.utils import insert_to_db, upsert_to_db
+from reels_trends.db.utils import (
+    insert_to_db,
+    upsert_to_db,
+    reel_snapshots_view,
+    mark_snapshots_uploaded,
+)
 from reels_trends.db.models import ReelsModel, ReelSnapshotModel
 from sqlalchemy import delete, select
 from datetime import datetime, timedelta, UTC, time
@@ -213,3 +221,46 @@ class SaveReelSnapshotsStep:
             result.rowcount,
         )
         return {}
+
+
+class UploadReelsToBigQueryStep:
+    name = "upload_to_big_query"
+    retry_count = 3
+    depends = ["save_instagram_posts"]
+
+    def should_apply(self, state: ScrapePostsState) -> bool:
+        return bool(state.get("scraped_data"))
+
+    async def apply(
+        self, state: ScrapePostsState, ctx: TaskContext
+    ) -> ScrapePostsState:
+        account = state["account_name"]
+        view = await reel_snapshots_view(ctx["db_session"], account)
+        if not view:
+            return {}
+        upload = pd.DataFrame(view)
+        bq_client = ctx["big_query_client"]
+
+        job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND")
+        await asyncio.to_thread(
+            _load_to_bigquery, bq_client, upload, secrets.DESTINATION_TABLE, job_config
+        )
+        logger.info(
+            "uploaded %d row(s) to bigquery table=%s",
+            len(upload),
+            secrets.DESTINATION_TABLE,
+        )
+
+        snapshot_ids = [int(row["snapshot_id"]) for row in view]
+        await mark_snapshots_uploaded(ctx["db_session"], snapshot_ids)
+        return {}
+
+
+def _load_to_bigquery(
+    bq_client: bigquery.Client,
+    df: pd.DataFrame,
+    table: str,
+    job_config: bigquery.LoadJobConfig,
+) -> None:
+    job = bq_client.load_table_from_dataframe(df, table, job_config=job_config)
+    job.result()

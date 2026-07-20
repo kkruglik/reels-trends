@@ -101,7 +101,8 @@ class ReelsModel(Base):
 
 
 class ReelSnapshotModel(Base):
-    """Time-series row: one per reel per scrape cycle. Append-only; never updated.
+    """Time-series row: one per reel per scrape cycle. Immutable except for
+    uploaded_to_bigquery, flipped once after a successful BigQuery export.
     Powers measured velocity in the trends pipeline (vs. the projection algorithm's
     single-snapshot extrapolation). Keyed by instagram_id, the natural key the posts
     pipeline already upserts on, so no post-upsert UUID lookup is needed."""
@@ -119,5 +120,8 @@ class ReelSnapshotModel(Base):
     comments_count: Mapped[int] = mapped_column(Integer, nullable=False)
     # play or view count, coalesced at write time
     video_view_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    uploaded_to_bigquery: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
     __table_args__ = (Index("ix_snap_ig_time", "instagram_id", "captured_at"),)

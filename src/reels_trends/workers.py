@@ -4,6 +4,7 @@ from reels_trends.pipeline import PIPELINE_STEPS
 from reels_trends.pipeline.base import TaskContext, run_pipeline
 from reels_trends.settings import secrets
 from aiogram import Bot
+from google.cloud import bigquery
 from sqlalchemy import select, distinct
 from asyncio import Queue, Semaphore
 import httpx2 as httpx
@@ -40,7 +41,7 @@ async def enqueue_all(pipeline: str, params: dict, job_id: str = "") -> None:
     logger.info("Enqueued %d items pipeline=%s job_id=%s", enqueued, pipeline, job_id)
 
 
-async def worker(bot: Bot) -> None:
+async def worker(bot: Bot, big_query_client: bigquery.Client) -> None:
     while True:
         username, pipeline, params, job_id = await queue.get()
         try:
@@ -56,6 +57,7 @@ async def worker(bot: Bot) -> None:
                     "db_session": db_session,
                     "http_client": http_client,
                     "bot": bot,
+                    "big_query_client": big_query_client,
                 }
                 await run_pipeline(
                     PIPELINE_STEPS[pipeline],

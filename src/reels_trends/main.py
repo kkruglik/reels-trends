@@ -3,6 +3,7 @@ from reels_trends.bot import create_bot
 from reels_trends.db.models import Base
 from reels_trends.db.session import engine
 from reels_trends.settings import secrets, config, IntervalSchedule
+from google.cloud import bigquery
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -59,12 +60,15 @@ async def main() -> None:
 
     bot, dp = await create_bot(secrets.TELEGRAM_BOT_TOKEN)
 
+    big_query_client = bigquery.Client(project=secrets.PROJECT_ID)
+
     def _on_worker_done(task: asyncio.Task) -> None:
         if not task.cancelled() and task.exception():
             logger.error("worker crashed: %s", task.exception())
 
     workers = [
-        asyncio.create_task(worker(bot)) for _ in range(secrets.WORKER_NUM_WORKERS)
+        asyncio.create_task(worker(bot, big_query_client))
+        for _ in range(secrets.WORKER_NUM_WORKERS)
     ]
     for w in workers:
         w.add_done_callback(_on_worker_done)

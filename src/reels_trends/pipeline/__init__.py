@@ -3,6 +3,7 @@ from reels_trends.pipeline.scrape_posts import (
     FetchInstagramPostsStep,
     SaveInstagramPostsStep,
     SaveReelSnapshotsStep,
+    UploadReelsToBigQueryStep,
 )
 from reels_trends.pipeline.scrape_profiles import (
     ScrapeInstagramProfileStep,
@@ -23,6 +24,7 @@ PIPELINE_STEPS: dict[str, list[PipelineStep]] = {
         FetchInstagramPostsStep(),
         SaveInstagramPostsStep(),
         SaveReelSnapshotsStep(),
+        UploadReelsToBigQueryStep(),
     ],
     "profile": [
         ScrapeInstagramProfileStep(),

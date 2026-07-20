@@ -3,6 +3,7 @@ from typing import Protocol, Iterable, TypedDict, Any
 from aiogram import Bot
 import logging
 import httpx2 as httpx
+from google.cloud import bigquery
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ class TaskContext(TypedDict):
     db_session: AsyncSession
     http_client: httpx.AsyncClient
     bot: Bot
+    big_query_client: bigquery.Client
 
 
 class PipelineStep(Protocol):
