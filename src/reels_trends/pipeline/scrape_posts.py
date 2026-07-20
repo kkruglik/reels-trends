@@ -239,6 +239,7 @@ class UploadReelsToBigQueryStep:
         if not view:
             return {}
         upload = pd.DataFrame(view)
+        upload["reel_id"] = upload["reel_id"].astype(str)
         bq_client = ctx["big_query_client"]
 
         job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND")
