@@ -13,6 +13,7 @@ from reels_trends.db.models import ReelsModel, ReelSnapshotModel
 from sqlalchemy import delete, select
 from datetime import datetime, timedelta, UTC, time
 from typing import TypedDict, Any, cast
+from requests.exceptions import ConnectionError as RequestsConnectionError
 import asyncio
 import logging
 
@@ -243,9 +244,27 @@ class UploadReelsToBigQueryStep:
         bq_client = ctx["big_query_client"]
 
         job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND")
-        await asyncio.to_thread(
-            _load_to_bigquery, bq_client, upload, secrets.DESTINATION_TABLE, job_config
-        )
+        attempts = secrets.BIGQUERY_UPLOAD_ATTEMPTS
+        for attempt in range(1, attempts + 1):
+            try:
+                await asyncio.to_thread(
+                    _load_to_bigquery,
+                    bq_client,
+                    upload,
+                    secrets.DESTINATION_TABLE,
+                    job_config,
+                )
+                break
+            except RequestsConnectionError:
+                if attempt == attempts:
+                    raise
+                logger.warning(
+                    "bigquery upload connection error account=%s attempt=%d/%d, retrying",
+                    account,
+                    attempt,
+                    attempts,
+                )
+                await asyncio.sleep(secrets.BIGQUERY_UPLOAD_RETRY_DELAY)
         logger.info(
             "uploaded %d row(s) to bigquery table=%s",
             len(upload),

@@ -20,6 +20,8 @@ class Secrets(BaseSettings):
     SCRAPE_HISTORY_ON_STARTUP: bool = False
     DESTINATION_TABLE: str
     PROJECT_ID: str
+    BIGQUERY_UPLOAD_ATTEMPTS: int = 3
+    BIGQUERY_UPLOAD_RETRY_DELAY: float = 5.0
 
 
 class IntervalSchedule(BaseModel):
