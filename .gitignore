@@ -221,3 +221,6 @@ data/*
 logs/*
 !logs/.gitkeep
 *.db
+
+# Local scratch scripts (already-tracked scripts/ files are unaffected)
+scripts/
