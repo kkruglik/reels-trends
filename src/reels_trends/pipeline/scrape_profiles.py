@@ -1,8 +1,8 @@
 from reels_trends.pipeline.base import TaskContext, START, ApifyBillingError
+from reels_trends.pipeline.apify import poll_apify_run
 from reels_trends.db.utils import upsert_to_db
 from reels_trends.db.models import InstagramAccountModel
 from typing import TypedDict, Any, cast
-import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -52,32 +52,7 @@ class FetchInstagramProfileStep:
     ) -> ScrapeProfileState:
         account = state["account_name"]
         run_id = state["scrape_profile_apify_task_id"]
-
-        while True:
-            response = await ctx["http_client"].get(
-                f"https://api.apify.com/v2/actor-runs/{run_id}",
-            )
-            response.raise_for_status()
-            status = response.json()["data"]["status"]
-            logger.debug("poll account=%s run_id=%s status=%s", account, run_id, status)
-
-            if status == "SUCCEEDED":
-                break
-            if status in ("FAILED", "ABORTED", "TIMED_OUT"):
-                raise RuntimeError(
-                    f"run failed account={account} run_id={run_id} status={status}"
-                )
-
-            await asyncio.sleep(10)
-
-        results = await ctx["http_client"].get(
-            f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items",
-        )
-        results.raise_for_status()
-        items = results.json()
-        logger.info(
-            "fetched account=%s run_id=%s count=%d", account, run_id, len(items)
-        )
+        items = await poll_apify_run(ctx["http_client"], run_id, account)
         return cast(ScrapeProfileState, {"scraped_data": items})
 
 
@@ -100,7 +75,7 @@ class SaveInstagramProfileStep:
                 "url": item["url"],
                 "profile_id": item["id"],
                 "follower_count": item["followersCount"],
-                "total_post_count": item["postsCount"],
+                "total_post_count": item.get("postsCount", 0),
                 "total_video_count": item.get("igtvVideoCount", 0),
                 "full_name": item.get("fullName"),
                 "verified": item.get("verified", False),

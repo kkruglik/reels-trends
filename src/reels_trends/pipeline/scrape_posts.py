@@ -3,6 +3,7 @@ from google.cloud import bigquery
 import pandas as pd
 from zoneinfo import ZoneInfo
 from reels_trends.pipeline.base import TaskContext, START, ApifyBillingError
+from reels_trends.pipeline.apify import poll_apify_run
 from reels_trends.db.utils import (
     insert_to_db,
     upsert_to_db,
@@ -95,32 +96,7 @@ class FetchInstagramPostsStep:
     ) -> ScrapePostsState:
         account = state["account_name"]
         run_id = state["scrape_posts_apify_task_id"]
-
-        while True:
-            response = await ctx["http_client"].get(
-                f"https://api.apify.com/v2/actor-runs/{run_id}",
-            )
-            response.raise_for_status()
-            status = response.json()["data"]["status"]
-            logger.debug("poll account=%s run_id=%s status=%s", account, run_id, status)
-
-            if status == "SUCCEEDED":
-                break
-            if status in ("FAILED", "ABORTED", "TIMED_OUT"):
-                raise RuntimeError(
-                    f"run failed account={account} run_id={run_id} status={status}"
-                )
-
-            await asyncio.sleep(10)
-
-        results = await ctx["http_client"].get(
-            f"https://api.apify.com/v2/actor-runs/{run_id}/dataset/items",
-        )
-        results.raise_for_status()
-        items = results.json()
-        logger.info(
-            "fetched account=%s run_id=%s count=%d", account, run_id, len(items)
-        )
+        items = await poll_apify_run(ctx["http_client"], run_id, account)
         return cast(ScrapePostsState, {"scraped_data": items})
 
 

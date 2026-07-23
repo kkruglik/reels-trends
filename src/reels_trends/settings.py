@@ -22,6 +22,7 @@ class Secrets(BaseSettings):
     PROJECT_ID: str
     BIGQUERY_UPLOAD_ATTEMPTS: int = 3
     BIGQUERY_UPLOAD_RETRY_DELAY: float = 5.0
+    APIFY_POLL_MAX_TRANSIENT_ERRORS: int = 5
 
 
 class IntervalSchedule(BaseModel):
