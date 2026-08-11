@@ -35,6 +35,10 @@ def _parse_instagram_username(raw: str) -> str:
 _USERNAME_RE = re.compile(r"^[\w.]{1,30}$")
 
 
+def _thread_id(message: Message) -> int:
+    return message.message_thread_id if message.is_topic_message else 0
+
+
 def _parse_usernames(text: str) -> list[str]:
     tokens = re.split(r"[\s,]+", text.strip())
     seen = set()
@@ -52,6 +56,7 @@ def _parse_usernames(text: str) -> list[str]:
 async def _add_profile(
     username: str,
     chat_id: int,
+    message_thread_id: int,
     tg_user,
     http_client: httpx.AsyncClient,
 ) -> str:
@@ -60,6 +65,7 @@ async def _add_profile(
             select(TaskModel).where(
                 TaskModel.username == username,
                 TaskModel.chat_id == chat_id,
+                TaskModel.message_thread_id == message_thread_id,
             )
         )
         if task_result.scalar_one_or_none() is not None:
@@ -83,7 +89,12 @@ async def _add_profile(
             "fullName": existing_account.full_name,
             "verified": existing_account.verified,
         }
-        logger.info("add profile cache hit chat_id=%s username=%s", chat_id, username)
+        logger.info(
+            "add profile cache hit chat_id=%s thread_id=%s username=%s",
+            chat_id,
+            message_thread_id,
+            username,
+        )
     else:
         try:
             profile = await validate_instagram_profile(username, http_client)
@@ -95,8 +106,9 @@ async def _add_profile(
             await enqueue_one("posts", profile["username"], params)
         except (ValueError, RuntimeError) as e:
             logger.warning(
-                "add profile failed chat_id=%s username=%s error=%s",
+                "add profile failed chat_id=%s thread_id=%s username=%s error=%s",
                 chat_id,
+                message_thread_id,
                 username,
                 e,
             )
@@ -133,14 +145,20 @@ async def _add_profile(
                     "username": profile["username"],
                     "user_id": tg_user.id,
                     "chat_id": chat_id,
+                    "message_thread_id": message_thread_id,
                 }
             ],
             TaskModel,
-            ["chat_id", "username"],
+            ["chat_id", "message_thread_id", "username"],
         )
 
     followers = profile.get("followersCount", 0)
-    logger.info("add profile done chat_id=%s username=%s", chat_id, username)
+    logger.info(
+        "add profile done chat_id=%s thread_id=%s username=%s",
+        chat_id,
+        message_thread_id,
+        username,
+    )
     return f"{username} — added ({followers:,} followers)"
 
 
@@ -173,15 +191,21 @@ async def cmd_add(message: Message) -> None:
     if len(usernames) > 1:
         await message.reply(f"Adding {len(usernames)} profiles...")
 
+    thread_id = _thread_id(message)
     async with httpx.AsyncClient(
         headers={"Authorization": f"Bearer {secrets.APIFY_TOKEN}"},
         timeout=httpx.Timeout(secrets.WORKER_HTTPX_TIMEOUT),
     ) as http_client:
         results = []
         for username in usernames:
-            logger.info("add profile chat_id=%s username=%s", message.chat.id, username)
+            logger.info(
+                "add profile chat_id=%s thread_id=%s username=%s",
+                message.chat.id,
+                thread_id,
+                username,
+            )
             result = await _add_profile(
-                username, message.chat.id, message.from_user, http_client
+                username, message.chat.id, thread_id, message.from_user, http_client
             )
             results.append(result)
 
@@ -190,9 +214,12 @@ async def cmd_add(message: Message) -> None:
 
 @router.message(Command("list"))
 async def cmd_list(message: Message) -> None:
-    logger.info("list chat_id=%s", message.chat.id)
+    thread_id = _thread_id(message)
+    logger.info("list chat_id=%s thread_id=%s", message.chat.id, thread_id)
     async with get_session() as db_session:
-        tasks = await get_all_from_db(db_session, TaskModel, chat_id=message.chat.id)
+        tasks = await get_all_from_db(
+            db_session, TaskModel, chat_id=message.chat.id, message_thread_id=thread_id
+        )
 
     if not tasks:
         await message.reply("No profiles tracked yet. Use /add username to start.")
@@ -204,9 +231,12 @@ async def cmd_list(message: Message) -> None:
 
 @router.message(Command("remove"))
 async def cmd_remove(message: Message) -> None:
-    logger.info("remove chat_id=%s", message.chat.id)
+    thread_id = _thread_id(message)
+    logger.info("remove chat_id=%s thread_id=%s", message.chat.id, thread_id)
     async with get_session() as db_session:
-        tasks = await get_all_from_db(db_session, TaskModel, chat_id=message.chat.id)
+        tasks = await get_all_from_db(
+            db_session, TaskModel, chat_id=message.chat.id, message_thread_id=thread_id
+        )
 
     if not tasks:
         await message.reply("No profiles tracked. Use /add username to start.")
@@ -239,14 +269,19 @@ async def cb_remove(callback: CallbackQuery) -> None:
         await callback.answer()
         return
 
+    thread_id = _thread_id(callback.message)
     logger.info(
-        "remove profile chat_id=%s username=%s", callback.message.chat.id, username
+        "remove profile chat_id=%s thread_id=%s username=%s",
+        callback.message.chat.id,
+        thread_id,
+        username,
     )
     async with get_session() as db_session:
         await db_session.execute(
             delete(TaskModel).where(
                 TaskModel.username == username,
                 TaskModel.chat_id == callback.message.chat.id,
+                TaskModel.message_thread_id == thread_id,
             )
         )
         await db_session.commit()

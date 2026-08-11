@@ -59,12 +59,14 @@ class NotifySummary:
             logger.info("no reels account=%s", account)
             return {}
 
-        chat_ids_result = await session.execute(
-            select(TaskModel.chat_id).where(TaskModel.username == account)
+        targets_result = await session.execute(
+            select(TaskModel.chat_id, TaskModel.message_thread_id).where(
+                TaskModel.username == account
+            )
         )
-        chat_ids = chat_ids_result.scalars().all()
+        targets = targets_result.all()
 
-        for chat_id in chat_ids:
+        for chat_id, thread_id in targets:
             message = f"📊 <b>Daily Top 5 from {escape(account)}</b>\n\n"
             for i, reel in enumerate(reels, 1):
                 caption = escape_and_truncate_caption(reel.caption or "", _CAPTION_BUDGET)
@@ -79,13 +81,15 @@ class NotifySummary:
                 if utf16_len(message) + utf16_len(item) > TELEGRAM_MAX_MESSAGE_LENGTH:
                     break
                 message += item
-            await ctx["bot"].send_message(chat_id, message, parse_mode="HTML")
+            await ctx["bot"].send_message(
+                chat_id, message, parse_mode="HTML", message_thread_id=thread_id or None
+            )
             await sleep(0.5)
 
         logger.info(
             "sent account=%s chats=%d posts=%d",
             account,
-            len(chat_ids),
+            len(targets),
             len(reels),
         )
         return {}

@@ -534,20 +534,24 @@ class NotifyTrending:
         )
         await session.commit()
 
-        chat_ids_result = await session.execute(
-            select(TaskModel.chat_id).where(TaskModel.username == account)
+        targets_result = await session.execute(
+            select(TaskModel.chat_id, TaskModel.message_thread_id).where(
+                TaskModel.username == account
+            )
         )
-        chat_ids = chat_ids_result.scalars().all()
+        targets = targets_result.all()
 
-        for chat_id in chat_ids:
+        for chat_id, thread_id in targets:
             for reel in reels:
                 play_count = reel.video_play_count or reel.video_view_count
                 views = f"{play_count:,}" if play_count else "—"
                 text = _format_trending_message(account, reel, views)
-                await ctx["bot"].send_message(chat_id, text, parse_mode="HTML")
+                await ctx["bot"].send_message(
+                    chat_id, text, parse_mode="HTML", message_thread_id=thread_id or None
+                )
                 await sleep(0.5)
 
         logger.info(
-            "notified account=%s chats=%d posts=%d", account, len(chat_ids), len(reels)
+            "notified account=%s chats=%d posts=%d", account, len(targets), len(reels)
         )
         return {}

@@ -57,7 +57,9 @@ class InstagramAccountModel(Base):
 class TaskModel(Base):
     __tablename__ = "tasks"
 
-    __table_args__ = (UniqueConstraint("chat_id", "username"),)
+    __table_args__ = (
+        UniqueConstraint("chat_id", "message_thread_id", "username"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     username: Mapped[str] = mapped_column(
@@ -65,6 +67,10 @@ class TaskModel(Base):
     )
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Telegram forum topic id within chat_id; 0 for the General topic or
+    # non-forum chats. Not nullable: SQLite treats each NULL as distinct in a
+    # UNIQUE constraint, which would break dedup for non-topic subscriptions.
+    message_thread_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     user: Mapped["UserModel"] = relationship("UserModel", back_populates="tasks")
     account: Mapped["InstagramAccountModel"] = relationship(
