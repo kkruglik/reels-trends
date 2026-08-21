@@ -1,6 +1,5 @@
 from reels_trends.workers import enqueue_all, worker
 from reels_trends.bot import create_bot
-from reels_trends.db.migrate import run_migrations
 from reels_trends.settings import secrets, config, IntervalSchedule
 from google.cloud import bigquery
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -31,8 +30,6 @@ async def main() -> None:
         force=True,
     )
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
-
-    await asyncio.to_thread(run_migrations)
 
     scheduler = AsyncIOScheduler()
     for job_id, job in config.pipelines.items():

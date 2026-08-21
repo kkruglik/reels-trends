@@ -20,7 +20,8 @@ WORKDIR /app
 RUN mkdir -p /app/data && chown appuser:appuser /app/data
 
 COPY --from=builder --chown=appuser:appuser /app /app
+RUN chmod +x /app/entrypoint.sh
 ENV PATH="/app/.venv/bin:$PATH"
 
 USER appuser
-CMD ["reels-trends"]
+ENTRYPOINT ["/app/entrypoint.sh"]

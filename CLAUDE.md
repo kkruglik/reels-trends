@@ -20,7 +20,7 @@ uv run python -c "from reels_trends.main import main"
 # Create a migration after changing db/models.py
 uv run alembic revision --autogenerate -m "describe the change"
 
-# Apply migrations manually (main() also does this automatically on every startup)
+# Apply migrations locally (Docker's entrypoint does this automatically before every container start)
 uv run alembic upgrade head
 ```
 
@@ -43,7 +43,7 @@ This is a Telegram bot that monitors Instagram Reels for trending content using 
 - `trends` — fetch unnotified recent reels, compute `likes_per_hour`/`views_per_hour`/`engagement_rate` vs. historical baseline (pandas), notify Telegram chats for hits
 - `summary` — daily digest of top reels by views
 
-**Database** (`db/`): SQLite via SQLAlchemy async + aiosqlite. Schema is versioned with Alembic (`migrations/`, config in `alembic.ini`); `main()` runs `db/migrate.py::run_migrations()` (`alembic upgrade head`, via `asyncio.to_thread` since Alembic itself uses a plain sync engine) on every startup, so pending migrations apply automatically — no manual DB commands needed for deploys. When changing `db/models.py`, add a migration with `alembic revision --autogenerate` and check the generated diff before committing. Tables: `users`, `instagram_accounts`, `tasks` (user×account×chat subscription), `reels`.
+**Database** (`db/`): SQLite via SQLAlchemy async + aiosqlite. Schema is versioned with Alembic (`migrations/`, config in `alembic.ini`). `entrypoint.sh` runs `alembic upgrade head` before `exec`-ing the bot, so pending migrations apply automatically on every container start — no manual DB commands needed for deploys (for local `uv run reels-trends`, run `uv run alembic upgrade head` yourself first). When changing `db/models.py`, add a migration with `alembic revision --autogenerate` and check the generated diff before committing. Tables: `users`, `instagram_accounts`, `tasks` (user×account×chat subscription), `reels`.
 
 **Key relationship**: `TaskModel` links a Telegram `chat_id` to an `instagram_accounts.username`. The worker deduplicates globally across all chats — it enqueues each unique username once, then `NotifyTrending`/`NotifySummary` fan out to all subscribed `chat_id`s.
 
