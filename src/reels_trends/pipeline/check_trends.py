@@ -29,8 +29,8 @@ _MAX_URL_LEN = 200
 
 def _format_trending_message(reel: ReelsModel, account: str) -> str:
     play_count = reel.video_play_count or reel.video_view_count
-    views_count = f"{play_count:,}" if play_count else "—"
-    shares_count = f"{reel.shares_count:,}" if reel.shares_count else "—"
+    views_count = f"{play_count:,}" if play_count is not None else "—"
+    shares_count = f"{reel.shares_count:,}" if reel.shares_count is not None else "—"
     posted_at = reel.posted_at.astimezone(ZoneInfo("Europe/Berlin")).strftime(
         "%d %b, %H:%M"
     )
