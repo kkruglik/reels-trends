@@ -85,6 +85,7 @@ class ReelsModel(Base):
     mentions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     likes_count: Mapped[int] = mapped_column(Integer, nullable=False)
     comments_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    shares_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     video_view_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     video_play_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     video_duration: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -118,10 +119,10 @@ class ReelSnapshotModel(Base):
     )
     likes_count: Mapped[int] = mapped_column(Integer, nullable=False)
     comments_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    # play or view count, coalesced at write time
     video_view_count: Mapped[int] = mapped_column(Integer, nullable=False)
     uploaded_to_bigquery: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    shares_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     __table_args__ = (Index("ix_snap_ig_time", "instagram_id", "captured_at"),)

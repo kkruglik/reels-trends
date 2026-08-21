@@ -69,6 +69,7 @@ class ScrapeInstagramPostsStep:
             "username": [account],
             "resultsLimit": p["scrape_results_limit"],
             "onlyPostsNewerThan": cutoff,
+            "includeSharesCount": True,
         }
         response = await ctx["http_client"].post(
             "https://api.apify.com/v2/acts/apify~instagram-reel-scraper/runs",
@@ -138,6 +139,7 @@ class SaveInstagramPostsStep:
                     tzinfo=UTC
                 ),
                 "username": item["ownerUsername"],
+                "shares_count": item.get("reshareCount"),
             }
             for item in valid
         ]
@@ -173,6 +175,7 @@ class SaveReelSnapshotsStep:
                 "video_view_count": (
                     item.get("videoPlayCount") or item.get("videoViewCount") or 0
                 ),
+                "shares_count": item.get("reshareCount"),
             }
             for item in state["scraped_data"]
             if item.get("id")

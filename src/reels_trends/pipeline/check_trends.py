@@ -18,6 +18,7 @@ from typing import TypedDict
 import logging
 import numpy as np
 import pandas as pd
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +27,18 @@ logger = logging.getLogger(__name__)
 _MAX_URL_LEN = 200
 
 
-def _format_trending_message(account: str, reel: ReelsModel, views: str) -> str:
+def _format_trending_message(reel: ReelsModel, account: str) -> str:
+    play_count = reel.video_play_count or reel.video_view_count
+    views_count = f"{play_count:,}" if play_count else "—"
+    shares_count = f"{reel.shares_count:,}" if reel.shares_count else "—"
+    posted_at = reel.posted_at.astimezone(ZoneInfo("Europe/Berlin")).strftime(
+        "%a, %d %b %Y %H:%M %Z"
+    )
     url = escape((reel.url or "")[:_MAX_URL_LEN])
     header = f"🔥 <b>Trending reel from {escape(account)}</b>\n\n"
     tail = (
-        f"\n\n👍 {reel.likes_count:,} · 💬 {reel.comments_count:,} · 👁 {views}\n\n"
+        f"\n\n👍 {reel.likes_count:,} · 💬 {reel.comments_count:,} · 🔁 {shares_count} · 👁 {views_count}\n"
+        f"🕐 Posted {posted_at}\n\n"
         f'<a href="{url}">Watch reel</a>'
     )
     budget = max(TELEGRAM_MAX_MESSAGE_LENGTH - utf16_len(header) - utf16_len(tail), 0)
@@ -338,14 +346,18 @@ class PredictTrending:
         candidates = state["candidates"].copy()
         history = state["history"].copy()
         snaps = state.get("candidate_snapshots")
-        snaps = snaps.copy() if snaps is not None else pd.DataFrame(
-            columns=[
-                "instagram_id",
-                "captured_at",
-                "likes_count",
-                "comments_count",
-                "video_view_count",
-            ]
+        snaps = (
+            snaps.copy()
+            if snaps is not None
+            else pd.DataFrame(
+                columns=[
+                    "instagram_id",
+                    "captured_at",
+                    "likes_count",
+                    "comments_count",
+                    "video_view_count",
+                ]
+            )
         )
         follower_count = state.get("follower_count", 0) or 0
         now = now or datetime.now(UTC)
@@ -385,7 +397,9 @@ class PredictTrending:
             else hist
         )
         thr_reach = (
-            mature["reach"].quantile(q) * multiplier if not mature.empty else float("inf")
+            mature["reach"].quantile(q) * multiplier
+            if not mature.empty
+            else float("inf")
         )
         thr_er = (
             hist["engagement_rate"].quantile(q) * multiplier
@@ -465,7 +479,9 @@ class PredictTrending:
             # construction, so a reel with genuinely strong ER shouldn't be discarded
             # just because its view growth has since plateaued. velocity_hit/reach_hit
             # are about growth, so they still require the reel to still be climbing.
-            is_trending = eligible and (climbing and (velocity_hit or reach_hit) or er_hit)
+            is_trending = eligible and (
+                climbing and (velocity_hit or reach_hit) or er_hit
+            )
 
             logger.info(
                 "vaudit account=%s id=%s age=%.1fh snaps=%d span=%.2fh eligible=%s "
@@ -541,9 +557,7 @@ class NotifyTrending:
 
         for chat_id in chat_ids:
             for reel in reels:
-                play_count = reel.video_play_count or reel.video_view_count
-                views = f"{play_count:,}" if play_count else "—"
-                text = _format_trending_message(account, reel, views)
+                text = _format_trending_message(reel, account)
                 await ctx["bot"].send_message(chat_id, text, parse_mode="HTML")
                 await sleep(0.5)
 
