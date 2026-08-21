@@ -32,13 +32,13 @@ def _format_trending_message(reel: ReelsModel, account: str) -> str:
     views_count = f"{play_count:,}" if play_count else "—"
     shares_count = f"{reel.shares_count:,}" if reel.shares_count else "—"
     posted_at = reel.posted_at.astimezone(ZoneInfo("Europe/Berlin")).strftime(
-        "%a, %d %b %Y %H:%M %Z"
+        "%d %b, %H:%M"
     )
     url = escape((reel.url or "")[:_MAX_URL_LEN])
     header = f"🔥 <b>Trending reel from {escape(account)}</b>\n\n"
     tail = (
         f"\n\n👍 {reel.likes_count:,} · 💬 {reel.comments_count:,} · 🔁 {shares_count} · 👁 {views_count}\n"
-        f"🕐 Posted {posted_at}\n\n"
+        f"🕐 <b>{posted_at}</b>\n\n"
         f'<a href="{url}">Watch reel</a>'
     )
     budget = max(TELEGRAM_MAX_MESSAGE_LENGTH - utf16_len(header) - utf16_len(tail), 0)
