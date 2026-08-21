@@ -139,7 +139,7 @@ class SaveInstagramPostsStep:
                     tzinfo=UTC
                 ),
                 "username": item["ownerUsername"],
-                "shares_count": item.get("reshareCount"),
+                "shares_count": item.get("sharesCount"),
             }
             for item in valid
         ]
@@ -175,7 +175,7 @@ class SaveReelSnapshotsStep:
                 "video_view_count": (
                     item.get("videoPlayCount") or item.get("videoViewCount") or 0
                 ),
-                "shares_count": item.get("reshareCount"),
+                "shares_count": item.get("sharesCount"),
             }
             for item in state["scraped_data"]
             if item.get("id")
