@@ -69,7 +69,7 @@ class ScrapeInstagramPostsStep:
             "username": [account],
             "resultsLimit": p["scrape_results_limit"],
             "onlyPostsNewerThan": cutoff,
-            "includeSharesCount": True,
+            "includeSharesCount": False,
         }
         response = await ctx["http_client"].post(
             "https://api.apify.com/v2/acts/apify~instagram-reel-scraper/runs",
